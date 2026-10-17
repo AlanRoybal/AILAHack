@@ -150,9 +150,14 @@ async function calibrate() {
 }
 
 await lens.idle()
-await bridge.audioControl(true, AudioInputSource.Glasses)
-await bridge.imuControl(true, ImuReportPace.P100)
-worn = (await bridge.getDeviceInfo().catch(() => null))?.status?.isWearing
+// Not awaited: with no audio device (the simulator on a headless box) these can hang, and the app must still start.
+const warn = (what: string) => (err: unknown) => console.warn(`${what} failed`, err)
+bridge.audioControl(true, AudioInputSource.Glasses).catch(warn('audio'))
+bridge.imuControl(true, ImuReportPace.P100).catch(warn('imu'))
+bridge.getDeviceInfo().then(d => {
+  if (d?.status?.isWearing !== undefined) worn = d.status.isWearing
+  showListen()
+}, warn('device info'))
 bridge.onDeviceStatusChanged(s => {
   if (s.isWearing !== undefined) worn = s.isWearing
   showListen()
