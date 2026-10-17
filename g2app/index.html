@@ -29,6 +29,11 @@
         <span id="listenState" class="dim"></span>
       </div>
       <div class="row"><button id="no">← left</button><button id="yes">right →</button></div>
+      <div class="row dim">simulated head (no IMU in the simulator)</div>
+      <div class="row">
+        <button data-lean="-20" data-flick>flick ←</button><button data-lean="-8">lean ←</button><button data-lean="0">neutral</button><button data-lean="8">lean →</button><button data-lean="20" data-flick>flick →</button>
+        <input id="head" type="range" min="-25" max="25" step="1" value="0" />
+      </div>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

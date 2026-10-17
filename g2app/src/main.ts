@@ -172,6 +172,7 @@ bridge.onEvenHubEvent((e: EvenHubEvent) => {
   const sys = e.sysEvent
   if (sys?.eventType === OsEventTypeList.IMU_DATA_REPORT && sys.imuData) {
     const { x = 0, y = 0, z = 0 } = sys.imuData
+    realImu = true
     tilt.feed(x, y, z)
     if (Date.now() - lastImuUi > 200) {
       lastImuUi = Date.now()
@@ -205,5 +206,23 @@ sel.onchange = () => {
 showListen()
 $('axis').textContent = tilt.calibrated ? `axis ${'xyz'[tilt.axis]} ${tilt.sign > 0 ? '+' : '-'}` : 'not calibrated'
 $('calib').onclick = () => void calibrate()
+
+// Simulated head for the Even Hub simulator, which sends no IMU data. Stops as soon as real IMU data arrives.
+let realImu = false
+let headDeg = 0
+const head = $('head') as HTMLInputElement
+document.querySelectorAll<HTMLButtonElement>('[data-lean]').forEach(b => {
+  b.onclick = () => {
+    head.value = b.dataset.lean!
+    if (b.dataset.flick !== undefined) setTimeout(() => (head.value = '0'), 700)
+  }
+})
+setInterval(() => {
+  if (realImu) return
+  headDeg += (Number(head.value) - headDeg) * 0.25
+  const r = (headDeg * Math.PI) / 180
+  tilt.feed(Math.sin(r), 0, Math.cos(r))
+  $('needle').style.left = `${50 + Math.max(-50, Math.min(50, tilt.lean * 2.5))}%`
+}, 20)
 $('yes').onclick = () => void (mode === 'choice' ? choose(1) : mode === 'working' ? undefined : decide(true))
 $('no').onclick = () => void (mode === 'choice' ? choose(0) : mode === 'working' ? commit(-1) : decide(false))
