@@ -58,6 +58,8 @@ async function decide(accept: boolean) {
   clearTimeout(timer)
   link.send({ type: 'decide', id, accept })
   await lens.release(accept ? 1 : -1)
+  // A choice (e.g. 7:00 is full) can arrive while the release plays; it owns the lens now.
+  if (mode !== 'card') return
   if (accept) {
     mode = 'working'
     await lens.working('On it')

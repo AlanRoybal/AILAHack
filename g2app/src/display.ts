@@ -142,10 +142,12 @@ export class Lens {
   }
 
   async choice(prompt: string, options: [string, string]) {
-    if (!this.choiceOf && prompt.includes(' · ')) [this.kind, this.what] = split(prompt)
+    // A card that is itself a choice carries the task title; a choice mid-task keeps the task's kind.
+    const midTask = this.layout === 'working' || this.layout === 'card'
+    if (!midTask) [this.kind, this.what] = split(prompt)
     this.choiceOf = { prompt, options }
     await this.go('choice', [
-      [HEAD, `${split(prompt)[0] === 'HANDOFF' ? prompt.toUpperCase() : this.kind}  //  PICK ONE`, { color: 2 }],
+      [HEAD, `${this.kind}  //  ${midTask && split(prompt)[0] !== this.kind ? prompt.toUpperCase().slice(0, 24) : 'PICK ONE'}`, { color: 2 }],
       [LEFT, `◀\n${options[0]}`, { border: 2, color: 3 }],
       [RIGHT, `▶\n${options[1]}`, { border: 2, color: 3 }],
       [METER, meter(0, false), { color: 2 }],
