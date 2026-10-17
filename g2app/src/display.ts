@@ -73,6 +73,7 @@ export class Lens {
   private label = ''
   private checksLine = ''
   private anim = 0
+  private fading = false
   /** Mirror for the phone page. */
   onMirror: (s: string) => void = () => {}
 
@@ -91,6 +92,7 @@ export class Lens {
   /** Rebuild into a new layout. A blank full-screen box takes input so text boxes never scroll. */
   private go(layout: Layout, boxes: [Box, string, { border?: number; color?: number }?][]) {
     this.anim++
+    this.fading = false
     this.shown = new Map(boxes.map(([b, c, o]) => [b.id, { content: c, color: o?.color ?? 4 }]))
     this.mirror()
     const capture = new TextContainerProperty({
@@ -157,17 +159,20 @@ export class Lens {
   /** Ignored: everything dims in two steps, then the caller clears it. */
   async fade() {
     if (this.layout !== 'card' && this.layout !== 'choice') return
+    this.fading = true
+    const gen = this.anim
     for (const level of [2, 1]) {
-      for (const [id, s] of this.shown) {
-        const b = [HEAD, BOX, LEFT, RIGHT, METER].find(x => x.id === id)!
-        await this.set(b, s.content, Math.min(s.color, level))
-      }
+      if (this.anim !== gen) return
+      await Promise.all(
+        [...this.shown].map(([id, s]) => this.set([HEAD, BOX, LEFT, RIGHT, METER].find(x => x.id === id)!, s.content, Math.min(s.color, level))),
+      )
       await new Promise(r => setTimeout(r, 450))
     }
   }
 
   /** Tracks the head every IMU sample: the meter fills and the leaned side brightens. */
   lean(deg: number) {
+    if (this.fading) return
     const u = unit(deg)
     if (this.layout === 'card') {
       void this.set(METER, meter(deg), Math.abs(u) > 0.25 ? 4 : 2)
@@ -182,7 +187,9 @@ export class Lens {
   /** Commit: the meter snaps full, the answer lands in the card, then the next state takes over. */
   async release(dir: 1 | -1) {
     if (this.layout !== 'card' && this.layout !== 'choice') return
+    const gen = this.anim
     await this.set(METER, meter(dir * COMMIT_DEG, this.layout === 'card'), 4)
+    if (this.anim !== gen) return
     if (this.layout === 'card') await this.set(BOX, dir === 1 ? `▶  ${this.what}` : `◀  Not now`, dir === 1 ? 4 : 2)
     else {
       await this.set(dir === 1 ? RIGHT : LEFT, this.shown.get((dir === 1 ? RIGHT : LEFT).id)!.content, 4)
@@ -207,10 +214,7 @@ export class Lens {
         [METER, fill(0, BAR), { color: 3 }],
       ])
       this.animate()
-    } else {
-      await this.set(HEAD, this.headText())
-      await this.set(BOX, this.boxText())
-    }
+    } else await Promise.all([this.set(HEAD, this.headText()), this.set(BOX, this.boxText())])
   }
 
   /** A real agent step finished: the bar eases to its share and the label swaps in place. */
