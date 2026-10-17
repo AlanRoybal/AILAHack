@@ -124,7 +124,7 @@ function onServer(m: ServerMessage) {
       if (mode === 'working') void lens.working(m.text)
       return
     }
-    const mark = m.phase === 'done' ? '✓' : m.phase === 'needs' ? '?' : 'x'
+    const mark = m.phase === 'done' ? '●' : m.phase === 'needs' ? '?' : 'x'
     mode = 'result'
     pending = null
     tilt.disarm()
