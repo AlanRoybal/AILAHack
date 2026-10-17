@@ -47,7 +47,7 @@ async function commit(dir: 1 | -1) {
     link.send({ type: 'cancel', id: pending })
     pending = null
     mode = 'result'
-    await lens.result('  × Cancelled')
+    await lens.result('  Cancelled')
     later(1500, () => void toIdle())
   }
 }
@@ -144,7 +144,7 @@ async function calibrate() {
   await lens.result('  Lean your head right\n  and hold')
   tilt.calibrate(async () => {
     $('axis').textContent = `axis ${'xyz'[tilt.axis]} ${tilt.sign > 0 ? '+' : '-'}`
-    await lens.result("  ✓ That's yes. Left is no.")
+    await lens.result("  That's yes. Left is no.")
     later(1800, () => void toIdle())
   })
 }

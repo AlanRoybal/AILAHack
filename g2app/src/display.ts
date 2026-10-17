@@ -193,9 +193,9 @@ export class Lens {
     await this.working(label)
   }
 
-  /** Each result of the one tilt, checked off in place: "✓ Table  ✓ Invite  · Text". */
+  /** Each result of the one tilt, checked off in place: "● Table   ● Invite   ○ Text". */
   async checks(items: Check[]) {
-    this.checksLine = items.map(i => `${i.state === 'done' ? '✓' : i.state === 'fail' ? '×' : '·'} ${i.label}`).join('   ')
+    this.checksLine = items.map(i => `${i.state === 'done' ? '●' : i.state === 'fail' ? '!' : '○'} ${i.label}`).join('   ')
     if (this.layout === 'working') await this.setText(this.workingText())
   }
 
