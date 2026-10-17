@@ -12,6 +12,8 @@ export const config = {
   inviteScriptUrl: env.INVITE_SCRIPT_URL ?? '',
   /** Requester's email; can also be set from the dashboard. */
   guestEmail: env.GUEST_EMAIL ?? '',
+  /** Google Slides deck the agent edits, by id. */
+  slidesId: env.SLIDES_ID ?? '',
   guestPhone: env.GUEST_PHONE ?? '',
   /** Cards below this detector confidence are dropped. */
   minConfidence: Number(env.MIN_CONFIDENCE || 0.75),

@@ -3,6 +3,8 @@ import { config } from './config.ts'
 import { detect, type Detected } from './detect.ts'
 import { bookingJob } from './skills/opentable.ts'
 import { meetJob } from './skills/meet.ts'
+import { sendJob } from './skills/send.ts'
+import { slidesJob } from './skills/slides.ts'
 import type { Job, SkillCtx } from './skills/types.ts'
 import { webJob } from './skills/web.ts'
 
@@ -37,12 +39,15 @@ export class Tasks {
   private lastText = ''
   private lastCardAt = 0
   private heardAt = 0
+  /** Final transcripts from the last few minutes, for requests like "send me that". */
+  private recent: { at: number; text: string }[] = []
 
   constructor(private readonly push: Push) {}
 
   hear(text: string, final: boolean) {
     this.push({ type: 'transcript', text, final })
     if (!this.heardAt) this.heardAt = Date.now()
+    if (final) this.recent = [...this.recent.filter(r => Date.now() - r.at < 180000), { at: Date.now(), text }]
     // Interim results repeat; only re-run detection when a few new words arrived.
     if (!final && text.split(' ').length - this.lastText.split(' ').length < 3) return
     this.lastText = final ? '' : text
@@ -68,6 +73,8 @@ export class Tasks {
     const job =
       d.kind === 'booking' && d.booking ? bookingJob(id, d.title, { ...d.booking, area: d.booking.area ?? undefined })
       : d.kind === 'meet' && d.meet ? meetJob(id, d.title, d.meet)
+      : d.kind === 'slides' ? slidesJob(id, d.title, d.request, this.context())
+      : d.kind === 'send' && d.send ? sendJob(id, d.title, d.send, d.request, this.context())
       : webJob(id, d.title, d.request)
     const abort = new AbortController()
     const live: Live = { job, abort, marks, prepared: Promise.resolve(), committing: false } as Live
@@ -109,7 +116,7 @@ export class Tasks {
       if (!ok || abort.signal.aborted) return void this.live.delete(id)
     }
     marks.card = Date.now()
-    console.log(`[${id}] card "${d.title}" ${JSON.stringify(d.booking ?? d.meet ?? d.request)}`)
+    console.log(`[${id}] card "${d.title}" ${JSON.stringify(d.booking ?? d.meet ?? d.send ?? d.request)}`)
     this.push({ type: 'card', task: job.card })
     // Ignoring the card is a no.
     live.timer = setTimeout(() => void this.decide(id, false), config.cardMs)
@@ -165,6 +172,10 @@ export class Tasks {
     this.live.delete(id)
     this.push({ type: 'clear', id })
     await live.job.cancel()
+  }
+
+  private context() {
+    return this.recent.map(r => r.text).join(' ')
   }
 
   /** Typed request from the dashboard: same path as speech. */

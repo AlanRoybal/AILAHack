@@ -1,4 +1,4 @@
-export type TaskKind = 'booking' | 'meet' | 'web'
+export type TaskKind = 'booking' | 'meet' | 'slides' | 'send' | 'web'
 
 export interface TaskCard {
   id: string
