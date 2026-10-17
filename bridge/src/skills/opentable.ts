@@ -102,7 +102,7 @@ export function bookingJob(id: string, title: string, p: BookingParams): Job {
             .sort((a, b) => a.min - b.min)
           if (near.length < 2) throw new Error('no alternatives')
           ctx.progress(`${short(slotLabel(want))} is full`)
-          const pick = await ctx.choose(`${place} · ${short(slotLabel(want))} full`, [short(near[0].label), short(near[1].label)])
+          const pick = await ctx.choose(`${short(slotLabel(want))} full · ${place}`, [short(near[0].label), short(near[1].label)])
           if (pick === null) return { phase: 'failed', text: 'Not booked' }
           min = near[pick].min
         }
