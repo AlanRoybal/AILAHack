@@ -1,0 +1,21 @@
+{
+  "name": "handoff-lens",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "pack": "npm run build && evenhub pack app.json dist -o handoff.ehpk",
+    "simulate": "evenhub-simulator http://localhost:5173 --automation-port 9898",
+    "qr": "evenhub qr --url http://$(ipconfig getifaddr en0 || hostname -I | cut -d' ' -f1):5173"
+  },
+  "dependencies": {
+    "@evenrealities/even_hub_sdk": "^0.0.16"
+  },
+  "devDependencies": {
+    "@evenrealities/evenhub-cli": "^0.1.14",
+    "@evenrealities/evenhub-simulator": "^0.9.5",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0"
+  }
+}

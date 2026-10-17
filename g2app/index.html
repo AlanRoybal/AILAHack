@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Handoff</title>
+    <style>
+      html, body { margin: 0; background: #050806; color: #8dffb3; font: 15px/1.4 ui-monospace, Menlo, monospace; touch-action: manipulation; }
+      main { padding: 16px; display: grid; gap: 12px; }
+      h1 { margin: 0; font-size: 18px; letter-spacing: .08em; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      button, select { background: #0c1a10; color: #8dffb3; border: 1px solid #2e6b43; border-radius: 8px; padding: 10px 14px; font: inherit; }
+      #lens { width: 100%; aspect-ratio: 2 / 1; background: #000; border: 1px solid #1b3a25; border-radius: 10px; white-space: pre; padding: 8px; box-sizing: border-box; overflow: hidden; }
+      #meter { height: 10px; background: #0c1a10; border-radius: 5px; position: relative; }
+      #meter i { position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; background: #8dffb3; }
+      .dim { color: #3f8a5a; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>HANDOFF</h1>
+      <div id="status" class="dim">starting</div>
+      <div id="lens"></div>
+      <div id="meter"><i id="needle"></i></div>
+      <div class="row dim" id="imu">imu -</div>
+      <div class="row">
+        <label>tilt axis <select id="axis"><option value="0">x</option><option value="1">y</option><option value="2">z</option></select></label>
+        <button id="flip">flip</button>
+        <button id="zero">zero</button>
+      </div>
+      <div class="row"><button id="no">← decline</button><button id="yes">accept →</button></div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

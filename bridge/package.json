@@ -1,0 +1,21 @@
+{
+  "name": "handoff-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx --env-file=.env src/server.ts",
+    "dev": "tsx watch --env-file=.env src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "bench": "tsx --env-file=.env scripts/bench.ts"
+  },
+  "dependencies": {
+    "playwright-core": "^1.48.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.0",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

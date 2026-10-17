@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Handoff</title>
+<style>
+  body { margin: 0; background: #030504; color: #8dffb3; font: 16px/1.45 ui-monospace, Menlo, monospace; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 24px; }
+  section { border: 1px solid #1b3a25; border-radius: 12px; padding: 16px; }
+  h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: .14em; color: #3f8a5a; }
+  #heard { min-height: 4.5em; font-size: 20px; }
+  #heard .interim { color: #3f8a5a; }
+  .card { border: 1px solid #2e6b43; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  .card .t { font-size: 18px; }
+  .card .s { color: #3f8a5a; }
+  .done .s { color: #8dffb3; }
+  button { background: #0c1a10; color: #8dffb3; border: 1px solid #2e6b43; border-radius: 8px; padding: 8px 12px; font: inherit; cursor: pointer; }
+  input { width: 100%; box-sizing: border-box; background: #000; color: #8dffb3; border: 1px solid #2e6b43; border-radius: 8px; padding: 10px; font: inherit; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { text-align: left; padding: 4px 6px; border-bottom: 1px solid #10261a; }
+  #clock { font-size: 56px; letter-spacing: .04em; }
+</style>
+</head>
+<body>
+<main>
+  <section><h2>HEARD</h2><div id="heard"></div>
+    <form id="f"><input id="q" placeholder="Type a request (fallback if the hall is too loud)" /></form></section>
+  <section><h2>ELAPSED SINCE REQUEST</h2><div id="clock">0.0s</div></section>
+  <section><h2>TASKS</h2><div id="cards"></div></section>
+  <section><h2>TIMING (s from first word)</h2>
+    <table><thead><tr><th>task</th><th>card</th><th>accept</th><th>done</th><th>agent</th></tr></thead><tbody id="times"></tbody></table></section>
+</main>
+<script>
+const ws = new WebSocket(`ws://${location.host}/ws`)
+const $ = id => document.getElementById(id)
+const tasks = {}
+let finals = '', started = 0, stopped = true
+ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', role: 'dash', token: new URLSearchParams(location.search).get('token') || '' }))
+ws.onmessage = e => {
+  const m = JSON.parse(e.data)
+  if (m.type === 'transcript') {
+    if (stopped) { started = Date.now(); stopped = false }
+    $('heard').innerHTML = m.final ? (finals = m.text) : `${finals ? finals + '<br>' : ''}<span class="interim">${m.text}</span>`
+  } else if (m.type === 'card') { tasks[m.task.id] = { title: m.task.title, phase: 'waiting', text: 'tilt right / left' }; draw() }
+  else if (m.type === 'status') { Object.assign(tasks[m.id] ||= { title: m.id }, { phase: m.phase, text: m.text }); if (m.phase !== 'working') stopped = true; draw() }
+  else if (m.type === 'clear') { tasks[m.id].phase = 'declined'; tasks[m.id].text = 'declined'; stopped = true; draw() }
+  else if (m.type === 'timing') {
+    const k = m.marks, s = x => ((k[x] - k.heard) / 1000).toFixed(1)
+    $('times').insertAdjacentHTML('afterbegin', `<tr><td>${tasks[m.id]?.title ?? m.id}</td><td>${s('card')}</td><td>${s('decided')}</td><td>${s('finished')}</td><td>${((k.finished - k.decided) / 1000).toFixed(1)}</td></tr>`)
+  }
+}
+function draw() {
+  $('cards').innerHTML = Object.entries(tasks).reverse().map(([id, t]) => `<div class="card ${t.phase}"><div><div class="t">${t.title}</div><div class="s">${t.phase} · ${t.text}</div></div>${t.phase === 'waiting' ? `<div><button onclick="decide('${id}',false)">←</button> <button onclick="decide('${id}',true)">→</button></div>` : ''}</div>`).join('')
+}
+function decide(id, accept) { ws.send(JSON.stringify({ type: 'decide', id, accept })) }
+$('f').onsubmit = e => { e.preventDefault(); started = Date.now(); stopped = false; ws.send(JSON.stringify({ type: 'inject', text: $('q').value })); $('q').value = '' }
+setInterval(() => { if (!stopped) $('clock').textContent = ((Date.now() - started) / 1000).toFixed(1) + 's' }, 100)
+</script>
+</body>
+</html>
