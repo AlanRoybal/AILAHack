@@ -6,6 +6,10 @@
 export const COMMIT_DEG = 14
 const HOLD_MS = 220
 const DEADZONE_DEG = 3
+// After a commit the head has to come back near neutral (or 1.5 s pass) before
+// leans count again, so returning from a right tilt never reads as a left one.
+const SETTLE_DEG = 5
+const SETTLE_MS = 1500
 const CALIB_DELTA = Math.sin((COMMIT_DEG * Math.PI) / 180)
 
 export class Tilt {
@@ -20,6 +24,7 @@ export class Tilt {
   private heldSince = 0
   private armed = false
   private calib: (() => void) | null = null
+  private settleUntil = 0
 
   constructor(private readonly onCommit: (dir: 1 | -1) => void, private readonly onLean: (lean: number) => void) {}
 
@@ -40,7 +45,7 @@ export class Tilt {
 
   /** Takes the current head pose as neutral and starts listening for a lean. */
   arm() {
-    this.neutral()
+    if (!this.settleUntil) this.neutral()
     this.armed = true
     this.heldSince = 0
   }
@@ -52,6 +57,7 @@ export class Tilt {
   /** Waits for one held lean to the right and learns which axis and sign that is. */
   calibrate(done: () => void) {
     this.disarm()
+    this.settleUntil = 0
     this.neutral()
     this.heldSince = 0
     this.calib = done
@@ -67,6 +73,12 @@ export class Tilt {
     if (this.calib) return this.feedCalib(g, now)
     const d = Math.max(-1, Math.min(1, g[this.axis] - this.base[this.axis]))
     const lean = this.sign * Math.asin(d) * (180 / Math.PI)
+    if (this.settleUntil) {
+      if (Math.abs(lean) > SETTLE_DEG && now < this.settleUntil) return void (this.lean = 0)
+      this.settleUntil = 0
+      this.base = g
+      return void (this.lean = 0)
+    }
     this.lean = Math.abs(lean) < DEADZONE_DEG ? 0 : lean
     if (!this.armed) return
     this.onLean(this.lean)
@@ -74,6 +86,7 @@ export class Tilt {
       this.heldSince ||= now
       if (now - this.heldSince >= HOLD_MS) {
         this.disarm()
+        this.settleUntil = now + SETTLE_MS
         this.onCommit(lean > 0 ? 1 : -1)
       }
     } else this.heldSince = 0
