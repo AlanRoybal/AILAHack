@@ -43,6 +43,27 @@ export function ring(frame: number) {
   })
 }
 
+/**
+ * Step ring: one arc per real agent step. Finished steps are bright, the step in
+ * progress pulses between two levels, the rest are dim.
+ */
+export function stepRing(done: number, total: number, pulse: boolean) {
+  return png(`step${done}/${total}${pulse ? 'p' : ''}`, RING, RING, c => {
+    const r = RING / 2
+    const gap = 0.32
+    c.lineCap = 'round'
+    c.lineWidth = 5
+    for (let i = 0; i < total; i++) {
+      const a0 = (i / total) * Math.PI * 2 - Math.PI / 2 + gap / 2
+      const a1 = ((i + 1) / total) * Math.PI * 2 - Math.PI / 2 - gap / 2
+      c.strokeStyle = g(i < done ? 255 : i === done ? (pulse ? 150 : 80) : 45)
+      c.beginPath()
+      c.arc(r, r, r - 6, a0, a1)
+      c.stroke()
+    }
+  })
+}
+
 export const DROP_W = 88
 export const DROP_H = 96
 export const DROP_FRAMES = 5

@@ -11,25 +11,27 @@ import {
   TextContainerUpgrade,
   type EvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
-import { DROP_FRAMES, DROP_H, DROP_W, RING, RING_FRAMES, blank, drop, ring } from './art.ts'
+import { DROP_FRAMES, DROP_H, DROP_W, RING, RING_FRAMES, blank, drop, ring, stepRing } from './art.ts'
 import { COMMIT_DEG } from './tilt.ts'
+import type { Check } from '../../shared/protocol.ts'
 
-type Layout = 'idle' | 'card' | 'working' | 'result'
+type Layout = 'idle' | 'card' | 'dim' | 'choice' | 'working' | 'result'
 
-const CARD = { x: 88, y: 180, w: 400, h: 72 }
-const CARD_COLS = 30
-const DROP_L = { id: 3, name: 'dropL', x: 0, y: CARD.y - 12, w: DROP_W, h: DROP_H }
-const DROP_R = { id: 4, name: 'dropR', x: CARD.x + CARD.w, y: CARD.y - 12, w: DROP_W, h: DROP_H }
-const RING_BOX = { id: 5, name: 'ring', x: CARD.x, y: CARD.y + 12, w: RING, h: RING }
+// Two firmware lines are ~54 px; 84 px leaves room for padding and the border without a scrollbar.
+const CARD = { x: 88, y: 176, w: 400, h: 84 }
+const COLS = 30
+const DROP_L = { id: 3, name: 'dropL', x: 0, y: CARD.y - 6, w: DROP_W, h: DROP_H }
+const DROP_R = { id: 4, name: 'dropR', x: CARD.x + CARD.w, y: CARD.y - 6, w: DROP_W, h: DROP_H }
+const RING_BOX = { id: 5, name: 'ring', x: CARD.x + 8, y: CARD.y + 18, w: RING, h: RING }
 
-const text = (o: { id: number; name: string; x: number; y: number; w: number; h: number; content: string; border?: number; color?: number; capture?: boolean }) =>
+const text = (o: { id: number; name: string; x: number; y: number; w: number; h: number; content: string; border?: number; borderColor?: number; color?: number; capture?: boolean }) =>
   new TextContainerProperty({
     xPosition: o.x,
     yPosition: o.y,
     width: o.w,
     height: o.h,
     borderWidth: o.border ?? 0,
-    borderColor: 12,
+    borderColor: o.borderColor ?? 12,
     borderRadius: 10,
     paddingLength: 8,
     containerID: o.id,
@@ -44,29 +46,38 @@ const image = (o: { id: number; name: string; x: number; y: number; w: number; h
 function page(layout: Layout, content: string) {
   const textObject: TextContainerProperty[] = []
   const imageObject: ImageContainerProperty[] = []
-  if (layout === 'idle') textObject.push(text({ id: 1, name: 'main', x: 0, y: 0, w: 576, h: 288, content: ' ', capture: true }))
-  if (layout === 'card') {
-    textObject.push(text({ id: 1, name: 'main', ...CARD, content, border: 2, capture: true }))
+  const main = { id: 1, name: 'main', capture: true, content }
+  if (layout === 'idle') textObject.push(text({ ...main, x: 0, y: 0, w: 576, h: 288, content: ' ' }))
+  if (layout === 'card' || layout === 'choice') {
+    textObject.push(text({ ...main, ...CARD, border: 2 }))
     imageObject.push(image(DROP_L), image(DROP_R))
   }
+  // Last 1.5 s of an ignored card: same card, dimmer, so it fades instead of vanishing.
+  if (layout === 'dim') textObject.push(text({ ...main, ...CARD, border: 1, borderColor: 5, color: 2 }))
   if (layout === 'working') {
-    textObject.push(text({ id: 1, name: 'main', x: CARD.x + RING + 8, y: CARD.y + 12, w: CARD.w - RING - 8, h: 48, content, color: 3, capture: true }))
+    textObject.push(text({ ...main, x: RING_BOX.x + RING + 10, y: CARD.y, w: CARD.w - RING - 18, h: CARD.h, color: 3 }))
     imageObject.push(image(RING_BOX))
   }
-  if (layout === 'result') textObject.push(text({ id: 1, name: 'main', ...CARD, content, border: 2, capture: true }))
+  if (layout === 'result') textObject.push(text({ ...main, ...CARD, border: 2 }))
   return { containerTotalNum: textObject.length + imageObject.length, textObject, imageObject }
 }
 
-/** Two card lines, padded so the text can slide inside the border as the head leans. */
+const unit = (lean: number) => Math.max(-1, Math.min(1, lean / COMMIT_DEG))
+
+/** Left-aligned card: what the agent understood, then the gesture hint. The text leans with the head. */
 function cardText(title: string, lean: number) {
-  const shift = Math.round((Math.max(-1, Math.min(1, lean / COMMIT_DEG)) * 6))
-  const center = (s: string) => {
-    const pad = Math.max(0, CARD_COLS - s.length)
-    const left = Math.max(0, Math.floor(pad / 2) + shift)
-    return ' '.repeat(left) + s
-  }
-  const hint = lean > 2 ? 'accept  ›››' : lean < -2 ? '‹‹‹  skip' : '‹ skip      accept ›'
-  return `${center(title.slice(0, CARD_COLS))}\n${center(hint)}`
+  const pad = ' '.repeat(Math.max(0, Math.round(2 + unit(lean) * 3)))
+  const u = unit(lean)
+  const hint = u > 0.3 ? `           yes ${'›'.repeat(Math.ceil(u * 3))}` : u < -0.3 ? `${'‹'.repeat(Math.ceil(-u * 3))} no` : '← no      yes →'
+  return `${pad}${title.slice(0, COLS)}\n${pad}${hint}`
+}
+
+/** "6:45 ←  → 7:30": tilt toward the time you want. The leaned side brightens with arrows. */
+function choiceText(prompt: string, options: [string, string], lean: number) {
+  const u = unit(lean)
+  const left = u < -0.3 ? `${options[0]} ◀━` : `${options[0]} ←`
+  const right = u > 0.3 ? `━▶ ${options[1]}` : `→ ${options[1]}`
+  return `  ${prompt.slice(0, COLS)}\n  ${left}    ${right}`
 }
 
 export class Lens {
@@ -74,7 +85,11 @@ export class Lens {
   private q: Promise<unknown> = Promise.resolve()
   private spin = 0
   private title = ''
+  private choiceOf: { prompt: string; options: [string, string] } | null = null
+  private steps: { done: number; total: number } | null = null
+  private label = ''
   private lastText = ''
+  private checksLine = ''
   /** Mirror for the phone page. */
   onMirror: (s: string) => void = () => {}
 
@@ -110,26 +125,47 @@ export class Lens {
     return this.run(() => this.bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: box.id, containerName: box.name, imageData: bytes })))
   }
 
+  private async clearDrops() {
+    await this.img(DROP_L, await blank(DROP_W, DROP_H))
+    await this.img(DROP_R, await blank(DROP_W, DROP_H))
+  }
+
   idle() {
+    this.choiceOf = null
+    this.steps = null
+    this.checksLine = ''
     return this.go('idle', ' ')
   }
 
   async card(title: string) {
     this.title = title
+    this.choiceOf = null
+    this.checksLine = ''
     await this.go('card', cardText(title, 0))
-    await this.img(DROP_L, await blank(DROP_W, DROP_H))
-    await this.img(DROP_R, await blank(DROP_W, DROP_H))
+    await this.clearDrops()
   }
 
-  /** Card text slides toward the lean; cheap text updates, so it can follow the head. */
+  async fade() {
+    if (this.layout === 'card') await this.go('dim', cardText(this.title, 0))
+    else if (this.layout === 'choice' && this.choiceOf) await this.go('dim', choiceText(this.choiceOf.prompt, this.choiceOf.options, 0))
+  }
+
+  async choice(prompt: string, options: [string, string]) {
+    this.choiceOf = { prompt, options }
+    await this.go('choice', choiceText(prompt, options, 0))
+    await this.clearDrops()
+  }
+
+  /** The card follows the head; cheap text updates, so it can track the lean before the commit. */
   lean(deg: number) {
     if (this.layout === 'card') void this.setText(cardText(this.title, deg))
+    else if (this.layout === 'choice' && this.choiceOf) void this.setText(choiceText(this.choiceOf.prompt, this.choiceOf.options, deg))
   }
 
   /** The card pinches off into a drop and leaves through the side it was tilted to. */
   async release(dir: 1 | -1) {
+    if (this.layout !== 'card' && this.layout !== 'choice') return
     const box = dir === 1 ? DROP_R : DROP_L
-    void this.setText(cardText(this.title, dir * COMMIT_DEG * 1.6))
     for (let f = 0; f < DROP_FRAMES; f++) {
       if (f === 1) void this.setText(' ')
       const t = Date.now()
@@ -139,15 +175,33 @@ export class Lens {
     }
   }
 
+  private workingText() {
+    return `${this.label}\n${this.checksLine || '← undo'}`
+  }
+
   async working(label: string) {
+    this.label = label
     if (this.layout !== 'working') {
-      await this.go('working', label)
+      await this.go('working', this.workingText())
       this.startSpin()
-    } else await this.setText(label)
+    } else await this.setText(this.workingText())
+  }
+
+  /** A real agent step finished: fill its segment and swap the one-word label in place. */
+  async step(done: number, total: number, label: string) {
+    this.steps = { done, total }
+    await this.working(label)
+  }
+
+  /** Each result of the one tilt, checked off in place: "✓ Table  ✓ Invite  · Text". */
+  async checks(items: Check[]) {
+    this.checksLine = items.map(i => `${i.state === 'done' ? '✓' : i.state === 'fail' ? '×' : '·'} ${i.label}`).join('   ')
+    if (this.layout === 'working') await this.setText(this.workingText())
   }
 
   async result(label: string) {
-    await this.go('result', label)
+    this.steps = null
+    await this.go('result', this.checksLine ? `${label}\n  ${this.checksLine}` : label)
   }
 
   private startSpin() {
@@ -155,11 +209,13 @@ export class Lens {
       const id = this.spin
       if (!id || this.layout !== 'working') return
       const t = Date.now()
-      await this.img(RING_BOX, await ring(id % RING_FRAMES))
+      const s = this.steps
+      await this.img(RING_BOX, await (s ? stepRing(s.done, s.total, id % 2 === 0) : ring(id % RING_FRAMES)))
       if (this.spin !== id) return
       this.spin = id + 1
       // Image writes take ~300-600 ms on hardware; never queue more than one.
-      setTimeout(tick, Math.max(0, 120 - (Date.now() - t)))
+      // The step ring only pulses, so it can tick slower.
+      setTimeout(tick, Math.max(0, (s ? 400 : 120) - (Date.now() - t)))
     }
     this.spin = 1
     void tick()

@@ -5,15 +5,20 @@
 <title>Handoff</title>
 <style>
   body { margin: 0; background: #030504; color: #8dffb3; font: 16px/1.45 ui-monospace, Menlo, monospace; }
-  main { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 24px; }
+  main { display: grid; grid-template-columns: 1.6fr 1fr; gap: 20px; padding: 24px; }
+  aside { display: grid; gap: 20px; align-content: start; }
   section { border: 1px solid #1b3a25; border-radius: 12px; padding: 16px; }
   h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: .14em; color: #3f8a5a; }
-  #heard { min-height: 4.5em; font-size: 20px; }
+  #live { width: 100%; border-radius: 8px; background: #000; display: block; min-height: 300px; }
+  #heard { min-height: 3em; font-size: 20px; }
   #heard .interim { color: #3f8a5a; }
   .card { border: 1px solid #2e6b43; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
   .card .t { font-size: 18px; }
-  .card .s { color: #3f8a5a; }
+  .card .s { color: #3f8a5a; white-space: pre-line; }
   .done .s { color: #8dffb3; }
+  .steps { display: flex; gap: 4px; margin-top: 6px; }
+  .steps i { width: 28px; height: 6px; border-radius: 3px; background: #10261a; }
+  .steps i.on { background: #8dffb3; }
   button { background: #0c1a10; color: #8dffb3; border: 1px solid #2e6b43; border-radius: 8px; padding: 8px 12px; font: inherit; cursor: pointer; }
   input { width: 100%; box-sizing: border-box; background: #000; color: #8dffb3; border: 1px solid #2e6b43; border-radius: 8px; padding: 10px; font: inherit; }
   table { width: 100%; border-collapse: collapse; }
@@ -23,37 +28,58 @@
 </head>
 <body>
 <main>
-  <section><h2>HEARD</h2><div id="heard"></div>
-    <form id="f"><input id="q" placeholder="Type a request (fallback if the hall is too loud)" /></form></section>
-  <section><h2>ELAPSED SINCE REQUEST</h2><div id="clock">0.0s</div></section>
-  <section><h2>TASKS</h2><div id="cards"></div></section>
-  <section><h2>TIMING (s from first word)</h2>
-    <table><thead><tr><th>task</th><th>card</th><th>accept</th><th>done</th><th>agent</th></tr></thead><tbody id="times"></tbody></table></section>
+  <section><h2>AGENT BROWSER (LIVE)</h2><img id="live" alt="" /></section>
+  <aside>
+    <section><h2>ELAPSED SINCE REQUEST</h2><div id="clock">0.0s</div></section>
+    <section><h2>HEARD</h2><div id="heard"></div>
+      <form id="f"><input id="q" placeholder="Type a request (fallback if the hall is too loud)" /></form></section>
+    <section><h2>TASKS</h2><div id="cards"></div></section>
+    <section><h2>RESULT GOES TO</h2>
+      <form id="g"><input id="email" type="email" placeholder="your email, for the calendar invite" />
+        <input id="phone" type="tel" placeholder="your phone, for the iMessage" style="margin-top:8px" /><button style="margin-top:8px">save</button></form></section>
+    <section><h2>TIMING (s from first word)</h2>
+      <table><thead><tr><th>task</th><th>card</th><th>accept</th><th>done</th><th>agent</th></tr></thead><tbody id="times"></tbody></table></section>
+  </aside>
 </main>
 <script>
 const ws = new WebSocket(`ws://${location.host}/ws`)
 const $ = id => document.getElementById(id)
 const tasks = {}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 let finals = '', started = 0, stopped = true
 ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', role: 'dash', token: new URLSearchParams(location.search).get('token') || '' }))
 ws.onmessage = e => {
   const m = JSON.parse(e.data)
-  if (m.type === 'transcript') {
+  if (m.type === 'frame') { $('live').src = 'data:image/jpeg;base64,' + m.data; return }
+  if (m.type === 'ready') { if (m.guest) $('email').value = m.guest; if (m.phone) $('phone').value = m.phone }
+  else if (m.type === 'transcript') {
     if (stopped) { started = Date.now(); stopped = false }
-    $('heard').innerHTML = m.final ? (finals = m.text) : `${finals ? finals + '<br>' : ''}<span class="interim">${m.text}</span>`
-  } else if (m.type === 'card') { tasks[m.task.id] = { title: m.task.title, phase: 'waiting', text: 'tilt right / left' }; draw() }
+    $('heard').innerHTML = m.final ? esc(finals = m.text) : `${finals ? esc(finals) + '<br>' : ''}<span class="interim">${esc(m.text)}</span>`
+  } else if (m.type === 'card') { tasks[m.task.id] = m.task.options ? { title: m.task.title, phase: 'pick', text: 'tilt to pick', options: m.task.options } : { title: m.task.title, phase: 'waiting', text: 'tilt right / left' }; draw() }
+  else if (m.type === 'checks') { Object.assign(tasks[m.id], { checks: m.items }); draw() }
+  else if (m.type === 'choice') { Object.assign(tasks[m.id], { phase: 'choice', text: m.prompt, options: m.options }); draw() }
+  else if (m.type === 'step') { Object.assign(tasks[m.id], { step: m }); if (['choice', 'pick', 'waiting'].includes(tasks[m.id].phase)) tasks[m.id].phase = 'working'; draw() }
   else if (m.type === 'status') { Object.assign(tasks[m.id] ||= { title: m.id }, { phase: m.phase, text: m.text }); if (m.phase !== 'working') stopped = true; draw() }
-  else if (m.type === 'clear') { tasks[m.id].phase = 'declined'; tasks[m.id].text = 'declined'; stopped = true; draw() }
+  else if (m.type === 'clear') { if (tasks[m.id]) Object.assign(tasks[m.id], { phase: 'declined', text: 'declined' }); stopped = true; draw() }
   else if (m.type === 'timing') {
-    const k = m.marks, s = x => ((k[x] - k.heard) / 1000).toFixed(1)
-    $('times').insertAdjacentHTML('afterbegin', `<tr><td>${tasks[m.id]?.title ?? m.id}</td><td>${s('card')}</td><td>${s('decided')}</td><td>${s('finished')}</td><td>${((k.finished - k.decided) / 1000).toFixed(1)}</td></tr>`)
+    const k = m.marks, s = x => k[x] ? ((k[x] - k.heard) / 1000).toFixed(1) : '-'
+    $('times').insertAdjacentHTML('afterbegin', `<tr><td>${esc(tasks[m.id]?.title ?? m.id)}</td><td>${s('card')}</td><td>${s('decided')}</td><td>${s('finished')}</td><td>${((k.finished - k.decided) / 1000).toFixed(1)}</td></tr>`)
   }
 }
 function draw() {
-  $('cards').innerHTML = Object.entries(tasks).reverse().map(([id, t]) => `<div class="card ${t.phase}"><div><div class="t">${t.title}</div><div class="s">${t.phase} · ${t.text}</div></div>${t.phase === 'waiting' ? `<div><button onclick="decide('${id}',false)">←</button> <button onclick="decide('${id}',true)">→</button></div>` : ''}</div>`).join('')
+  $('cards').innerHTML = Object.entries(tasks).reverse().slice(0, 4).map(([id, t]) => {
+    const steps = t.step ? `<div class="steps">${Array.from({ length: t.step.total }, (_, i) => `<i class="${i < t.step.index ? 'on' : ''}"></i>`).join('')} <span class="s">${esc(t.step.label)}</span></div>` : ''
+    const btns = t.phase === 'waiting' ? `<button onclick="send({type:'decide',id:'${id}',accept:false})">←</button> <button onclick="send({type:'decide',id:'${id}',accept:true})">→</button>`
+      : t.phase === 'pick' ? `<button onclick="send({type:'decide',id:'${id}',accept:true,pick:0})">${esc(t.options[0])} ←</button> <button onclick="send({type:'decide',id:'${id}',accept:true,pick:1})">→ ${esc(t.options[1])}</button>`
+      : t.phase === 'choice' ? `<button onclick="send({type:'choose',id:'${id}',pick:0})">${esc(t.options[0])} ←</button> <button onclick="send({type:'choose',id:'${id}',pick:1})">→ ${esc(t.options[1])}</button>`
+      : t.phase === 'working' ? `<button onclick="send({type:'cancel',id:'${id}'})">undo</button>` : ''
+    const checks = t.checks ? `<div class="s">${t.checks.map(c => `${c.state === 'done' ? '✓' : c.state === 'fail' ? '×' : '·'} ${esc(c.label)}`).join('&nbsp;&nbsp; ')}</div>` : ''
+    return `<div class="card ${t.phase}"><div><div class="t">${esc(t.title)}</div><div class="s">${t.phase} · ${esc(t.text)}</div>${steps}${checks}</div><div>${btns}</div></div>`
+  }).join('')
 }
-function decide(id, accept) { ws.send(JSON.stringify({ type: 'decide', id, accept })) }
-$('f').onsubmit = e => { e.preventDefault(); started = Date.now(); stopped = false; ws.send(JSON.stringify({ type: 'inject', text: $('q').value })); $('q').value = '' }
+const send = m => ws.send(JSON.stringify(m))
+$('f').onsubmit = e => { e.preventDefault(); started = Date.now(); stopped = false; send({ type: 'inject', text: $('q').value }); $('q').value = '' }
+$('g').onsubmit = e => { e.preventDefault(); send({ type: 'guest', email: $('email').value, phone: $('phone').value }); document.activeElement.blur() }
 setInterval(() => { if (!stopped) $('clock').textContent = ((Date.now() - started) / 1000).toFixed(1) + 's' }, 100)
 </script>
 </body>
