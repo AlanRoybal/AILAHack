@@ -96,7 +96,7 @@ export function bookingJob(id: string, title: string, p: BookingParams): Job {
         if (!slots.some(s => s.min === want)) {
           // The asked-for time is gone: offer the two closest times at the first restaurant.
           const near = slots
-            .filter(s => s.rawPlace === rawPlace)
+            .filter((s, i, all) => s.rawPlace === rawPlace && all.findIndex(o => o.rawPlace === rawPlace && o.min === s.min) === i)
             .sort((a, b) => Math.abs(a.min - want) - Math.abs(b.min - want))
             .slice(0, 2)
             .sort((a, b) => a.min - b.min)
