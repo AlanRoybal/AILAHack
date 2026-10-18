@@ -7,8 +7,20 @@
   "min_sdk_version": "0.0.16",
   "entrypoint": "index.html",
   "permissions": [
-    { "name": "g2-microphone", "desc": "Hears requests other people make to you so an agent can handle them." },
-    { "name": "network", "desc": "Connects to the Handoff bridge on your laptop.", "whitelist": ["http://localhost:8787", "ws://localhost:8787"] }
+    {
+      "name": "g2-microphone",
+      "desc": "Hears requests other people make to you so an agent can handle them."
+    },
+    {
+      "name": "network",
+      "desc": "Connects to the Handoff bridge that runs the agent.",
+      "whitelist": [
+        "https://ebony-original-friendship-nights.trycloudflare.com",
+        "wss://ebony-original-friendship-nights.trycloudflare.com"
+      ]
+    }
   ],
-  "supported_languages": ["en"]
+  "supported_languages": [
+    "en"
+  ]
 }

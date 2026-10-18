@@ -10,7 +10,8 @@
     "qr": "evenhub qr --url http://$(ipconfig getifaddr en0 || hostname -I | cut -d' ' -f1):5173"
   },
   "dependencies": {
-    "@evenrealities/even_hub_sdk": "^0.0.16"
+    "@evenrealities/even_hub_sdk": "^0.0.16",
+    "g2-kit": "^0.4.0"
   },
   "devDependencies": {
     "@evenrealities/evenhub-cli": "^0.1.14",
