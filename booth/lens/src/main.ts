@@ -27,7 +27,10 @@ const warn = (what: string) => (err: unknown) => console.warn(`${what} failed`, 
 
 let state: State = { briefs: [], followups: {}, now: Date.now() }
 let skew = 0
-let screen: 'list' | 'brief' | 'ready' | 'listen' = 'list'
+let screen: 'event' | 'eventListen' | 'eventWait' | 'found' | 'list' | 'brief' | 'ready' | 'listen' = 'event'
+let listenFor: 'name' | 'event' = 'name'
+let eventName = ''
+let eventMiss = ''
 let cursor = 0
 let point = 0
 let pcm: Uint8Array[] = []
@@ -52,6 +55,16 @@ function prepView(): View {
   if (p.error) return { icon: { kind: 'failed', letter: 'C' }, title: 'Prep failed', sub: 'CREAO run', detail: cut(p.error, 44) }
   if (p.endedAt) return { icon: { kind: 'idle' }, title: 'No matches', sub: 'Rerun prep on the laptop' }
   return { icon: { kind: 'research' }, title: 'Researching', sub: 'LA Hacks sponsors', detail: 'CREAO is ranking fit' }
+}
+
+function eventView(): View {
+  if (screen === 'eventListen') return { icon: { kind: 'mic' }, title: 'Where are you?', sub: 'Listening', detail: 'Say the career fair or event', hint: [['Tap', 'done']] }
+  if (screen === 'eventWait') return { icon: { kind: 'search' }, title: 'Finding your event', sub: 'One moment', hint: [] }
+  if (screen === 'found')
+    return state.briefs.length
+      ? { icon: { kind: 'research' }, title: eventName, sub: `${state.briefs.length} sponsors found`, detail: 'Ranked for your resume', hint: [['Tap', 'see list']] }
+      : { icon: { kind: 'research' }, title: eventName, sub: 'Researching sponsors', detail: 'CREAO is ranking fit', hint: [['Tap', 'see list']] }
+  return { icon: { kind: 'idle' }, title: 'Which career fair?', sub: 'Tap, then say where you are', detail: eventMiss || undefined, hint: [['Tap', 'say event'], ['Double tap', 'exit']] }
 }
 
 function listView(b: Brief): View {
@@ -106,7 +119,7 @@ function briefView(b: Brief): View {
   }
 }
 
-const view = (): View => (!brief() ? prepView() : screen === 'list' ? listView(brief()) : briefView(brief()))
+const view = (): View => (screen.startsWith('event') || screen === 'found' ? eventView() : !brief() ? prepView() : screen === 'list' ? listView(brief()) : briefView(brief()))
 
 // Fixed layout after the Figma lens cards: 144 tile on the left, big title, then
 // three dimming levels of firmware text.
@@ -186,8 +199,36 @@ async function poll() {
   await render()
 }
 
-function startListen() {
-  screen = 'listen'
+async function postEvent(init: RequestInit) {
+  screen = 'eventWait'
+  eventMiss = ''
+  await render()
+  try {
+    const r = await call('/event', { method: 'POST', ...init })
+    const j = await r.json()
+    if (r.ok && j.event) {
+      eventName = j.event
+      screen = 'found'
+      await poll()
+      window.setTimeout(() => {
+        if (screen === 'found') {
+          screen = 'list'
+          void render()
+        }
+      }, 3000)
+      return
+    }
+    eventMiss = j.heard ? cut(`Didn't catch "${j.heard}"`, 40) : "Didn't hear anything"
+  } catch {
+    eventMiss = "Can't reach the server"
+  }
+  screen = 'event'
+  await render()
+}
+
+function startListen(kind: 'name' | 'event' = 'name') {
+  listenFor = kind
+  screen = kind === 'event' ? 'eventListen' : 'listen'
   pcm = []
   bridge.audioControl(true, AudioInputSource.Glasses).catch(warn('audio'))
   listenTimer = window.setTimeout(() => void stopListen(), LISTEN_MS)
@@ -196,16 +237,23 @@ function startListen() {
 async function stopListen() {
   clearTimeout(listenTimer)
   bridge.audioControl(false, AudioInputSource.Glasses).catch(warn('audio'))
-  screen = 'ready'
   const len = pcm.reduce((n, c) => n + c.length, 0)
   const body = new Uint8Array(len)
   pcm.reduce((o, c) => (body.set(c, o), o + c.length), 0)
+  if (listenFor === 'event') return postEvent({ body, headers: { 'content-type': 'application/octet-stream' } })
+  screen = 'ready'
   await render()
   if (len) await api('/name', { body, headers: { 'content-type': 'application/octet-stream' } })
 }
 
 async function sendTypedName(name: string) {
-  if (!brief() || !name.trim()) return
+  if (!name.trim()) return
+  if (screen.startsWith('event')) {
+    clearTimeout(listenTimer)
+    bridge.audioControl(false, AudioInputSource.Glasses).catch(warn('audio'))
+    return postEvent({ body: JSON.stringify({ text: name }), headers: { 'content-type': 'application/json' } })
+  }
+  if (!brief()) return
   clearTimeout(listenTimer)
   bridge.audioControl(false, AudioInputSource.Glasses).catch(warn('audio'))
   screen = 'ready'
@@ -237,7 +285,7 @@ const typeOf = (e?: { eventType?: OsEventTypeList }) => (e ? (e.eventType ?? OsE
 
 bridge.onEvenHubEvent(event => {
   if (event.audioEvent?.audioPcm) {
-    if (screen === 'listen') pcm.push(event.audioEvent.audioPcm)
+    if (screen === 'listen' || screen === 'eventListen') pcm.push(event.audioEvent.audioPcm)
     return
   }
   const sysEv = event.sysEvent
@@ -251,8 +299,8 @@ bridge.onEvenHubEvent(event => {
   const txt = typeOf(event.textEvent)
   const is = (t: OsEventTypeList) => sys === t || txt === t
   if (is(OsEventTypeList.DOUBLE_CLICK_EVENT)) {
-    if (screen === 'listen') return void stopListen()
-    if (screen === 'brief' || screen === 'ready') screen = 'list'
+    if (screen === 'listen' || screen === 'eventListen') return void stopListen()
+    if (screen === 'brief' || screen === 'ready' || screen === 'found') screen = 'list'
     else bridge.shutDownPageContainer(1)
   } else if (txt === OsEventTypeList.SCROLL_TOP_EVENT || txt === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
     const step = txt === OsEventTypeList.SCROLL_TOP_EVENT ? -1 : 1
@@ -262,8 +310,11 @@ bridge.onEvenHubEvent(event => {
     } else if (screen === 'brief' && !followup()) point = Math.max(0, point + step)
   }
   else if (is(OsEventTypeList.CLICK_EVENT)) {
-    if (screen === 'list' && state.briefs.length) screen = 'brief'
-    else if (screen === 'listen') return void stopListen()
+    if (screen === 'event') startListen('event')
+    else if (screen === 'eventWait') return
+    else if (screen === 'found') screen = 'list'
+    else if (screen === 'list' && state.briefs.length) screen = 'brief'
+    else if (screen === 'listen' || screen === 'eventListen') return void stopListen()
     else {
       const f = followup()
       if (f ? f.phase === 'cancelled' || f.phase === 'failed' : screen === 'ready') startListen()

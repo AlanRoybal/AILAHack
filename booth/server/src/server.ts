@@ -21,6 +21,7 @@ const dataDir = new URL('../data/', import.meta.url)
 const resume = readFileSync(new URL('resume.txt', dataDir), 'utf8')
 const sponsors: string[] = JSON.parse(readFileSync(new URL('sponsors.json', dataDir), 'utf8'))
 const reps: Record<string, Rep[]> = JSON.parse(readFileSync(new URL('reps.json', dataDir), 'utf8'))
+const events: { name: string; full: string; aliases?: string[] }[] = JSON.parse(readFileSync(new URL('events.json', dataDir), 'utf8'))
 const stateFile = new URL('state.json', dataDir)
 
 interface Brief { company: string; match: number; role: string; rep: string; points: string[]; why: string }
@@ -39,12 +40,13 @@ interface Followup {
   error?: string
   runs: Run[]
 }
-interface State { briefs: Brief[]; prep?: Run; followups: Record<string, Followup> }
+interface State { briefs: Brief[]; prep?: Run; followups: Record<string, Followup>; event?: { name: string; heard: string } }
 
 const state: State = existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, 'utf8')) : { briefs: [], followups: {} }
 const save = () => writeFileSync(stateFile, JSON.stringify(state, null, 1))
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const timers = new Map<string, NodeJS.Timeout>()
+const eventFull = () => (events.find(e => e.name === state.event?.name) ?? events[0]).full
 
 const account = key.startsWith('cr_sk_')
 const agentId = env.CREAO_AGENT_ID ?? appId
@@ -102,7 +104,7 @@ function lastJson(text: string): unknown {
 }
 
 const prepRequest = () => `MODE: PREP_BRIEFS
-You are Booth Brief. The candidate below is at the LA Hacks AI Hackathon 2026 at UCLA and will walk the sponsor booths.
+You are Booth Brief. The candidate below is at the ${eventFull()} and will walk the sponsor booths.
 For EACH sponsor: research the web for current open roles (internships or new grad) that fit this resume, recent company news from the last 3 months, and who from the company is at the event. Known booth staff: ${JSON.stringify(reps)}. Score fit 0-100 against the resume.
 Write 3 talking points per sponsor. Each pairs one specific resume item with a specific need from that sponsor's open role or product, written as "<resume item> → <their need>", under 40 characters. Use different resume items for different sponsors where possible, and never repeat a point across sponsors. No em dashes.
 Return ONLY one JSON object in a json code block:
@@ -112,7 +114,7 @@ RESUME:
 ${resume}`
 
 const draftRequest = (b: Brief, rep: string) => `MODE: FIND_AND_DRAFT
-You are Booth Brief. The candidate just talked to ${rep} at ${b.company}'s booth at the LA Hacks AI Hackathon 2026 at UCLA.
+You are Booth Brief. The candidate just talked to ${rep} at ${b.company}'s booth at the ${eventFull()}.
 1. Find ${rep}'s work email with Apollo.io: in your sandbox, call POST https://api.apollo.io/api/v1/people/match with header "x-api-key: ${apolloKey}" and JSON {"name": "${rep}", "organization_name": "${b.company}", "reveal_personal_emails": false}. If there is no match, search https://api.apollo.io/api/v1/mixed_people/api_search for the company (it returns ids but no emails), pick the closest name, then call people/match with {"id": <that person id>}.
 2. Write a short follow-up email (under 120 words, no em dashes, plain and specific) from the candidate to ${rep}, referencing ${JSON.stringify(b.points)} and the role "${b.role}".
 Do NOT send anything. Return ONLY a json code block:
@@ -238,6 +240,21 @@ createServer(async (req, res) => {
       if (state.prep && !state.prep.endedAt && !state.prep.error) return json(res, 409, { error: 'prep already running' })
       void prep()
       return json(res, 202, { ok: true })
+    }
+    if (path === '/event') {
+      const raw = await readRaw(req)
+      const names = events.flatMap(e => [e.name, ...(e.aliases ?? [])].map(n => ({ name: n, title: e.name })))
+      const heard =
+        req.headers['content-type'] === 'application/json'
+          ? String(JSON.parse(raw.toString()).text ?? '')
+          : await transcribe(raw, names.map(n => n.name))
+      if (!heard.trim()) return json(res, 422, { error: 'nothing heard', heard })
+      const m = matchRep(heard, names)
+      if (!m) return json(res, 404, { error: 'no matching event', heard })
+      state.event = { name: m.rep.title!, heard }
+      save()
+      if (!state.briefs.length && !(state.prep && !state.prep.endedAt && !state.prep.error)) void prep()
+      return json(res, 200, { event: state.event.name, heard, sponsors: sponsors.length })
     }
     const company = u.searchParams.get('company') ?? ''
     if (!state.briefs.some(b => b.company === company)) return json(res, 404, { error: `no brief for ${company}` })
