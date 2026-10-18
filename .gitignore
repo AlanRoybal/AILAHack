@@ -4,3 +4,6 @@ dist
 .env.local
 *.ehpk
 *.log
+booth/server/.env
+booth/server/data/state.json
+booth/server/data/resume.txt

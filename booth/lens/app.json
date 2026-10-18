@@ -1,0 +1,17 @@
+{
+  "package_id": "com.alanroybal.boothbrief",
+  "edition": "202601",
+  "name": "Booth Brief",
+  "version": "0.1.0",
+  "min_app_version": "2.2.10",
+  "min_sdk_version": "0.0.16",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Loads sponsor briefs from the Booth Brief server and asks it to send follow-ups.",
+      "whitelist": []
+    }
+  ],
+  "supported_languages": ["en"]
+}
