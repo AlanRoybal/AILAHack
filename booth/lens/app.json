@@ -8,6 +8,10 @@
   "entrypoint": "index.html",
   "permissions": [
     {
+      "name": "g2-microphone",
+      "desc": "Hears the booth rep's name after you meet them so CREAO can find their email."
+    },
+    {
       "name": "network",
       "desc": "Loads sponsor briefs from the Booth Brief server and asks it to send follow-ups.",
       "whitelist": []

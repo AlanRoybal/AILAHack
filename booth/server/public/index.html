@@ -50,7 +50,7 @@ async function tick() {
     return `<tr><td class="fit">${b.match}</td>
       <td><b>${esc(b.company)}</b><br>${esc(b.role)}<br><span class="why">${esc(b.rep)}</span></td>
       <td>${esc(b.why)}<ul>${(b.points || []).map(p => `<li>${esc(p)}</li>`).join('')}</ul></td>
-      <td>${f ? `<span class="tag">${f.error ? 'failed' : f.status}</span><br><span class="why">${esc(f.to)}</span>` : ''}</td></tr>`
+      <td>${f ? `<span class="tag">${esc(f.phase)}</span><br>${esc(f.rep)}${f.matched ? '' : ' (no list match)'}<br><span class="why">heard "${esc(f.heard)}"${f.email ? '<br>Apollo: ' + esc(f.email) : ''}${f.to ? '<br>to ' + esc(f.to) : ''}${f.error ? '<br>' + esc(f.error) : ''}</span>` : ''}</td></tr>`
   }).join('')
 }
 $('prep').onclick = async () => { await fetch('/api/prep', { method: 'POST' }); tick() }

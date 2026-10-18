@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { matchRep, type Rep } from './match.ts'
 
 const env = process.env
 const port = Number(env.PORT ?? 8790)
@@ -8,33 +9,41 @@ const appId = env.CREAO_APP_ID ?? ''
 const field = env.CREAO_INPUT_FIELD ?? 'request'
 const testEmail = env.TEST_EMAIL ?? ''
 const sendToRep = env.SEND_TO_REP === '1'
-const base = 'https://agent.creao.ai/api/v1/apps'
+const deepgramKey = env.DEEPGRAM_API_KEY ?? ''
+const countdownMs = Number(env.COUNTDOWN_MS ?? 8000)
+const base = env.CREAO_BASE_URL ?? 'https://agent.creao.ai/api/v1/apps'
 
 const dataDir = new URL('../data/', import.meta.url)
 const resume = readFileSync(new URL('resume.txt', dataDir), 'utf8')
 const sponsors: string[] = JSON.parse(readFileSync(new URL('sponsors.json', dataDir), 'utf8'))
+const reps: Record<string, Rep[]> = JSON.parse(readFileSync(new URL('reps.json', dataDir), 'utf8'))
 const stateFile = new URL('state.json', dataDir)
-const reps: Record<string, { rep: string; repEmail?: string }> = JSON.parse(readFileSync(new URL('reps.json', dataDir), 'utf8'))
 
-export interface Brief {
-  company: string
-  match: number
-  role: string
+interface Brief { company: string; match: number; role: string; rep: string; points: string[]; why: string }
+interface Run { id?: string; status: string; startedAt: number; endedAt?: number; error?: string; summary?: string }
+type Phase = 'drafting' | 'countdown' | 'sending' | 'sent' | 'cancelled' | 'failed'
+interface Followup {
+  phase: Phase
+  heard: string
   rep: string
-  repEmail?: string
-  points: string[]
-  why: string
+  matched: boolean
+  email?: string
+  to?: string
+  subject?: string
+  body?: string
+  sendAt?: number
+  error?: string
+  runs: Run[]
 }
-type RunState = { id: string; status: string; startedAt: number; endedAt?: number; error?: string; summary?: string }
-interface State {
-  briefs: Brief[]
-  prep?: RunState
-  followups: Record<string, RunState & { to: string }>
-}
+interface State { briefs: Brief[]; prep?: Run; followups: Record<string, Followup> }
+
 const state: State = existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, 'utf8')) : { briefs: [], followups: {} }
 const save = () => writeFileSync(stateFile, JSON.stringify(state, null, 1))
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+const timers = new Map<string, NodeJS.Timeout>()
 
 async function creao(path: string, init?: RequestInit) {
+  if (!key || !appId) throw new Error('set CREAO_API_KEY and CREAO_APP_ID')
   const r = await fetch(`${base}/${appId}/runs${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -44,22 +53,20 @@ async function creao(path: string, init?: RequestInit) {
   return body as { id: string; status: string; result?: { text?: string; chatText?: string }; errorCode?: string }
 }
 
-async function startRun(request: string) {
-  const run = await creao('', { method: 'POST', body: JSON.stringify({ inputs: { [field]: request } }) })
-  return run.id
-}
-
-async function waitRun(id: string, rs: RunState) {
+/** Starts a CREAO run, polls it to the end and returns the JSON block from its reply. */
+async function run(request: string, rs: Run): Promise<any> {
+  const started = await creao('', { method: 'POST', body: JSON.stringify({ inputs: { [field]: request } }) })
+  rs.id = started.id
+  rs.status = started.status
+  save()
   for (;;) {
-    await new Promise(r => setTimeout(r, 4000))
-    const run = await creao(`/${id}`)
-    rs.status = run.status
-    if (['completed', 'failed', 'cancelled'].includes(run.status)) {
-      rs.endedAt = Date.now()
-      if (run.status !== 'completed') rs.error = run.errorCode ?? run.status
-      save()
-      return run.result?.text ?? run.result?.chatText ?? ''
-    }
+    await new Promise(r => setTimeout(r, 3000))
+    const r = await creao(`/${rs.id}`)
+    rs.status = r.status
+    if (!['completed', 'failed', 'cancelled'].includes(r.status)) continue
+    rs.endedAt = Date.now()
+    if (r.status !== 'completed') throw new Error(r.errorCode ?? r.status)
+    return lastJson(r.result?.text ?? r.result?.chatText ?? '')
   }
 }
 
@@ -76,93 +83,152 @@ function lastJson(text: string): unknown {
 }
 
 const prepRequest = () => `MODE: PREP_BRIEFS
-You are Booth Brief. The candidate below is at the LA Hacks AI Hackathon 2026 (UCLA, Oct 17-18, 2026) and will walk the sponsor booths.
-For EACH sponsor: research the web for current open roles (internships or new grad) that fit this resume, recent company news from the last 3 months, and who from the company is at or tied to this event (a recruiter, DevRel or engineer; use public posts about LA Hacks or the sponsor's university recruiting team). Score fit 0-100 against the resume.
-Write 3 talking points per sponsor, each under 40 characters, that connect a specific resume item to the company. No em dashes.
+You are Booth Brief. The candidate below is at the LA Hacks AI Hackathon 2026 at UCLA and will walk the sponsor booths.
+For EACH sponsor: research the web for current open roles (internships or new grad) that fit this resume, recent company news from the last 3 months, and who from the company is at the event. Known booth staff: ${JSON.stringify(reps)}. Score fit 0-100 against the resume.
+Write 3 talking points per sponsor, each under 32 characters, that connect a specific resume item to the company. No em dashes.
 Return ONLY one JSON object in a json code block:
-{"briefs":[{"company":"","match":0,"role":"best-fit open role, under 30 chars","rep":"name and title or 'unknown'","repEmail":"public work email if found, else empty","points":["","",""],"why":"one sentence on the fit"}]}
-Sorted by match, highest first.
+{"briefs":[{"company":"","match":0,"role":"best-fit open role, under 30 chars","rep":"who to ask for, under 24 chars","points":["","",""],"why":"one sentence on the fit"}]}
 SPONSORS: ${JSON.stringify(sponsors)}
 RESUME:
 ${resume}`
 
-const followupRequest = (b: Brief, to: string) => `MODE: SEND_FOLLOWUP
-You are Booth Brief. The candidate just talked to ${b.company}'s booth at the LA Hacks AI Hackathon 2026 at UCLA.
-Write a short follow-up email (under 120 words, no em dashes, plain and specific) from the candidate to ${b.rep}. Reference these talking points: ${JSON.stringify(b.points)} and the role "${b.role}". Attach nothing.
-Send it now with the connected Gmail account to: ${to}${to !== b.repEmail ? ` (test recipient; address it to ${b.rep} as if it were going to them)` : ''}.
-Then return ONLY a json code block: {"sent":true,"to":"${to}","subject":"","summary":"one line"}
+const draftRequest = (b: Brief, rep: string) => `MODE: FIND_AND_DRAFT
+You are Booth Brief. The candidate just talked to ${rep} at ${b.company}'s booth at the LA Hacks AI Hackathon 2026 at UCLA.
+1. Find ${rep}'s work email with Apollo.io: in your sandbox, call POST https://api.apollo.io/api/v1/people/match with header "x-api-key: $APOLLO_API_KEY" (secret env var) and JSON {"name": "${rep}", "organization_name": "${b.company}", "reveal_personal_emails": false}. If there is no match, search https://api.apollo.io/api/v1/mixed_people/search for the company and pick the closest name.
+2. Write a short follow-up email (under 120 words, no em dashes, plain and specific) from the candidate to ${rep}, referencing ${JSON.stringify(b.points)} and the role "${b.role}".
+Do NOT send anything. Return ONLY a json code block:
+{"email":"found address or empty","apolloName":"name on the Apollo record","subject":"","body":""}
 Candidate resume:
 ${resume}`
 
+const sendRequest = (f: Followup) => `MODE: SEND_EMAIL
+Send this email now with the connected Gmail account, exactly as written, to ${f.to}.
+Subject: ${f.subject}
+Body:
+${f.body}
+Then return ONLY a json code block: {"sent":true,"to":"${f.to}"}`
+
 async function prep() {
-  const id = await startRun(prepRequest())
-  const rs: RunState = (state.prep = { id, status: 'running', startedAt: Date.now() })
-  save()
+  const rs: Run = (state.prep = { status: 'pending', startedAt: Date.now() })
   try {
-    const text = await waitRun(id, rs)
-    if (rs.error) return
-    const out = lastJson(text) as { briefs: Brief[] }
-    state.briefs = out.briefs.map(b => ({ ...b, ...reps[b.company] })).sort((a, b) => b.match - a.match)
+    const out = (await run(prepRequest(), rs)) as { briefs: Brief[] }
+    state.briefs = out.briefs.sort((a, b) => b.match - a.match)
     rs.summary = `${state.briefs.length} briefs`
   } catch (e) {
-    rs.error = String(e)
+    rs.error = errText(e)
   }
   save()
 }
 
-async function followup(company: string) {
-  const found = state.briefs.find(x => x.company === company)
-  const b = found && { ...found, ...reps[company] }
-  if (!b) throw new Error(`no brief for ${company}`)
-  const to = sendToRep && b.repEmail ? b.repEmail : testEmail
-  if (!to) throw new Error('set TEST_EMAIL')
-  const id = await startRun(followupRequest(b, to))
-  const rs: RunState & { to: string } = (state.followups[company] = { id, status: 'running', startedAt: Date.now(), to })
+async function transcribe(pcm: Buffer, names: string[]) {
+  if (!deepgramKey) throw new Error('set DEEPGRAM_API_KEY or type the name')
+  const q = new URLSearchParams({ model: 'nova-3', encoding: 'linear16', sample_rate: '16000', channels: '1', smart_format: 'true' })
+  for (const n of names) q.append('keyterm', n)
+  const r = await fetch(`https://api.deepgram.com/v1/listen?${q}`, {
+    method: 'POST',
+    headers: { Authorization: `Token ${deepgramKey}`, 'Content-Type': 'audio/l16' },
+    body: new Uint8Array(pcm),
+  })
+  if (!r.ok) throw new Error(`Deepgram ${r.status}`)
+  const j = (await r.json()) as any
+  return (j.results?.channels?.[0]?.alternatives?.[0]?.transcript as string) ?? ''
+}
+
+async function draft(company: string, heard: string) {
+  const b = state.briefs.find(x => x.company === company)!
+  const m = matchRep(heard, reps[company] ?? [])
+  const f: Followup = (state.followups[company] = { phase: 'drafting', heard, rep: m?.rep.name ?? heard, matched: !!m, runs: [] })
+  const rs: Run = { status: 'pending', startedAt: Date.now() }
+  f.runs.push(rs)
   save()
   try {
-    const text = await waitRun(id, rs)
-    if (!rs.error) rs.summary = (lastJson(text) as { summary?: string }).summary ?? 'sent'
+    const out = (await run(draftRequest(b, f.rep), rs)) as { email?: string; subject: string; body: string }
+    Object.assign(f, { email: out.email || undefined, subject: out.subject, body: out.body })
+    f.to = sendToRep ? f.email : testEmail
+    if (!f.to) throw new Error(sendToRep ? 'Apollo found no email' : 'set TEST_EMAIL')
+    f.phase = 'countdown'
+    f.sendAt = Date.now() + countdownMs
+    timers.set(company, setTimeout(() => void send(company), countdownMs))
   } catch (e) {
-    rs.error = String(e)
+    f.phase = 'failed'
+    f.error = errText(e)
   }
   save()
+}
+
+async function send(company: string) {
+  const f = state.followups[company]
+  timers.delete(company)
+  if (f?.phase !== 'countdown') return
+  f.phase = 'sending'
+  const rs: Run = { status: 'pending', startedAt: Date.now() }
+  f.runs.push(rs)
+  save()
+  try {
+    await run(sendRequest(f), rs)
+    f.phase = 'sent'
+  } catch (e) {
+    f.phase = 'failed'
+    f.error = errText(e)
+  }
+  save()
+}
+
+function cancel(company: string) {
+  const f = state.followups[company]
+  if (f?.phase !== 'countdown') return false
+  clearTimeout(timers.get(company))
+  timers.delete(company)
+  f.phase = 'cancelled'
+  save()
+  return true
 }
 
 const json = (res: ServerResponse, code: number, body: unknown) => {
-  res.writeHead(code, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type' })
+  res.writeHead(code, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify(body))
 }
-const readBody = (req: IncomingMessage) =>
-  new Promise<any>(r => {
-    let s = ''
-    req.on('data', c => (s += c))
-    req.on('end', () => r(s ? JSON.parse(s) : {}))
+const readRaw = (req: IncomingMessage) =>
+  new Promise<Buffer>(r => {
+    const chunks: Buffer[] = []
+    req.on('data', c => chunks.push(c))
+    req.on('end', () => r(Buffer.concat(chunks)))
   })
 
 createServer(async (req, res) => {
-  const url = (req.url ?? '/').replace(/^\/api/, '')
-  if (req.method === 'OPTIONS') return json(res, 204, {})
+  const u = new URL(req.url ?? '/', 'http://x')
+  const path = u.pathname.replace(/^\/api/, '')
   try {
-    if (url === '/' && req.method === 'GET' && !req.url?.startsWith('/api')) {
+    if (u.pathname === '/') {
       res.writeHead(200, { 'Content-Type': 'text/html' })
       return res.end(readFileSync(new URL('../public/index.html', import.meta.url)))
     }
-    if (url === '/state') return json(res, 200, { ...state, appId, testEmail, sendToRep })
-    if (url === '/prep' && req.method === 'POST') {
-      if (state.prep?.status === 'running') return json(res, 409, { error: 'prep already running' })
+    if (path === '/state') return json(res, 200, { ...state, now: Date.now(), testEmail, sendToRep })
+    if (req.method !== 'POST') return json(res, 404, { error: 'not found' })
+    if (path === '/prep') {
+      if (state.prep && !state.prep.endedAt && !state.prep.error) return json(res, 409, { error: 'prep already running' })
       void prep()
       return json(res, 202, { ok: true })
     }
-    if (url === '/followup' && req.method === 'POST') {
-      const { company } = await readBody(req)
-      if (!state.briefs.some(b => b.company === company)) return json(res, 404, { error: `no brief for ${company}` })
-      if (!testEmail && !sendToRep) return json(res, 400, { error: 'set TEST_EMAIL' })
-      if (state.followups[company]?.status === 'running') return json(res, 409, { error: 'already running' })
-      void followup(company).catch(e => console.error(e))
-      return json(res, 202, { ok: true })
+    const company = u.searchParams.get('company') ?? ''
+    if (!state.briefs.some(b => b.company === company)) return json(res, 404, { error: `no brief for ${company}` })
+    if (path === '/cancel') return json(res, 200, { cancelled: cancel(company) })
+    if (path === '/name') {
+      const phase = state.followups[company]?.phase
+      if (phase && !['cancelled', 'failed'].includes(phase)) return json(res, 409, { error: `follow-up is ${phase}` })
+      const raw = await readRaw(req)
+      const heard =
+        req.headers['content-type'] === 'application/json'
+          ? String(JSON.parse(raw.toString()).text ?? '')
+          : await transcribe(raw, (reps[company] ?? []).map(r => r.name))
+      if (!heard.trim()) return json(res, 422, { error: 'no name heard' })
+      void draft(company, heard)
+      return json(res, 202, { heard })
     }
     json(res, 404, { error: 'not found' })
   } catch (e) {
-    json(res, 500, { error: String(e) })
+    json(res, 500, { error: errText(e) })
   }
-}).listen(port, () => console.log(`[booth] http://localhost:${port}  app ${appId || '(set CREAO_APP_ID)'}  follow-ups → ${sendToRep ? 'rep' : testEmail || '(set TEST_EMAIL)'}`))
+}).listen(port, () =>
+  console.log(`[booth] http://localhost:${port}  app ${appId || '(set CREAO_APP_ID)'}  stt ${deepgramKey ? 'deepgram' : 'off (typed names only)'}  follow-ups → ${sendToRep ? 'rep (Apollo email)' : testEmail || '(set TEST_EMAIL)'}`),
+)
