@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Booth Brief</title>
+<style>
+  body { margin: 0; background: #111; color: #e5e5e5; font: 15px/1.45 system-ui, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 28px; }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  .sub { color: #999; margin-bottom: 20px; }
+  button { background: #3ddc84; color: #111; border: 0; border-radius: 6px; padding: 9px 16px; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+  .run { margin: 14px 0 22px; color: #bbb; }
+  .run a { color: #3ddc84; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top; }
+  th { color: #888; font-weight: 500; font-size: 13px; }
+  .fit { font-weight: 700; color: #3ddc84; font-size: 18px; }
+  ul { margin: 4px 0 0; padding-left: 18px; color: #bbb; }
+  .why { color: #999; font-size: 13px; }
+  .tag { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #2a2a2a; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Booth Brief</h1>
+  <div class="sub">LA Hacks AI Hackathon 2026 sponsors, researched and ranked against your resume by CREAO.</div>
+  <button id="prep">Research sponsors with CREAO</button>
+  <div class="run" id="run"></div>
+  <table>
+    <thead><tr><th>Fit</th><th>Sponsor</th><th>Talking points</th><th>Follow-up</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</main>
+<script>
+const $ = id => document.getElementById(id)
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const secs = r => Math.round(((r.endedAt ?? Date.now()) - r.startedAt) / 1000)
+function runLine(r, label) {
+  if (!r) return ''
+  const st = r.error ? `failed: ${esc(r.error)}` : r.status
+  return `${label}: ${st} (${secs(r)}s)${r.summary ? ' · ' + esc(r.summary) : ''}`
+}
+async function tick() {
+  const s = await (await fetch('/api/state')).json()
+  $('prep').disabled = s.prep?.status === 'running'
+  $('run').innerHTML = (runLine(s.prep, 'CREAO research run') || 'No run yet.') + `<br>Follow-ups go to ${esc(s.sendToRep ? 'the rep' : s.testEmail || '(TEST_EMAIL unset)')}`
+  $('rows').innerHTML = s.briefs.map(b => {
+    const f = s.followups[b.company]
+    return `<tr><td class="fit">${b.match}</td>
+      <td><b>${esc(b.company)}</b><br>${esc(b.role)}<br><span class="why">${esc(b.rep)}</span></td>
+      <td>${esc(b.why)}<ul>${(b.points || []).map(p => `<li>${esc(p)}</li>`).join('')}</ul></td>
+      <td>${f ? `<span class="tag">${esc(f.phase)}</span><br>${esc(f.rep)}${f.matched ? '' : ' (no list match)'}<br><span class="why">heard "${esc(f.heard)}"${f.email ? '<br>Apollo: ' + esc(f.email) : ''}${f.to ? '<br>to ' + esc(f.to) : ''}${f.error ? '<br>' + esc(f.error) : ''}</span>` : ''}</td></tr>`
+  }).join('')
+}
+$('prep').onclick = async () => { await fetch('/api/prep', { method: 'POST' }); tick() }
+tick(); setInterval(tick, 2000)
+</script>
+</body>
+</html>

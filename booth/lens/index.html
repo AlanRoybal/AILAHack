@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+    <title>Booth Brief</title>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        /* ER brand dark-theme surface (#232323) + Neutral-200 text (#E5E5E5). */
+        background: #232323;
+        color: #E5E5E5;
+        font: 14px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        /* Kill WebView zoom + iOS auto-sizing + rubber-band scroll. */
+        touch-action: manipulation;
+        -webkit-text-size-adjust: 100%;
+        overscroll-behavior: none;
+      }
+      #app { display: flex; height: 100%; }
+    </style>
+  </head>
+  <body>
+    <div style="margin:12px">
+      <pre id="lens" style="white-space:pre-wrap;font:14px/1.4 ui-monospace,monospace;color:#3ddc84"></pre>
+      <p><input id="name" placeholder="Rep name (typed fallback)" /> <button id="nameGo">Send name</button></p>
+      <p><button data-lean="-20">Lean left</button> <button data-lean="20">Lean right</button> <span id="lean"></span></p>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
