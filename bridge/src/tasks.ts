@@ -60,6 +60,8 @@ export class Tasks {
     detect(text, abort.signal)
       .then(d => {
         if (!d || abort.signal.aborted || Date.now() - this.lastCardAt < 6000 || this.live.size) return
+        // Edits and sends need the exact words, so they wait for the end of the sentence.
+        if (!final && (d.kind === 'slides' || d.kind === 'send')) return
         this.start(d, { heard: heardAt || t0, detectStart: t0, detected: Date.now() })
       })
       .catch(err => {

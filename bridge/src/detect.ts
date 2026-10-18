@@ -28,6 +28,7 @@ booking = book a restaurant table now (OpenTable). meet = find a time for the sp
 addressed = the speaker is asking the wearer ("can you", "book us", "send me") or proposing to meet them ("we should get lunch"), not describing, quoting, or talking to someone else.
 confidence = how sure you are this is a real request the wearer would want done now. Ignore small talk, questions about the product, and anything already done.
 The text is live speech-to-text and can mishear words, so read "Fry" or "Fri" next to a time as Friday. Leave booking.query empty unless the speaker clearly named a restaurant or cuisine.
+If the request is cut off before its key detail ("change the title to" with no new title), return {"task":null}.
 Only include the object matching the kind. Now is ${new Date().toLocaleString('en-US', { timeZone: config.tz, weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}. Default party 2, default time 7:00 PM, default area ${config.city}.`
 
 const hhmm = (when: string) => {
