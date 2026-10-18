@@ -5,6 +5,7 @@ import { matchRep, type Rep } from './match.ts'
 const env = process.env
 const port = Number(env.PORT ?? 8790)
 const key = env.CREAO_API_KEY ?? ''
+const apolloKey = env.APOLLO_API_KEY ?? ''
 const appId = env.CREAO_APP_ID ?? ''
 const field = env.CREAO_INPUT_FIELD ?? 'request'
 const testEmail = env.TEST_EMAIL ?? ''
@@ -44,11 +45,11 @@ const timers = new Map<string, NodeJS.Timeout>()
 
 const account = key.startsWith('cr_sk_')
 const agentId = env.CREAO_AGENT_ID ?? appId
-const devBase = env.CREAO_DEV_URL ?? 'https://developer.creao.ai/v1'
+const devBase = env.CREAO_DEV_URL ?? 'https://developer.creao.ai/v2'
 
 interface CreaoRun { status: string; result?: unknown; error?: string }
 
-/** Account keys (cr_sk_) use developer.creao.ai/v1/runs; agent keys (capi_) use the app-scoped API Trigger. */
+/** Project keys (cr_sk_) use the Developer Platform developer.creao.ai/v2/runs; agent keys (capi_) use the app-scoped API Trigger. */
 async function creao(runId: string | null, input?: Record<string, string>): Promise<CreaoRun & { id: string }> {
   if (!key || !agentId) throw new Error('set CREAO_API_KEY and CREAO_AGENT_ID')
   const url = account
@@ -66,7 +67,7 @@ async function creao(runId: string | null, input?: Record<string, string>): Prom
 }
 
 const resultText = (res: any): string =>
-  typeof res === 'string' ? res : res?.text ?? res?.chatText ?? res?.output ?? JSON.stringify(res ?? '')
+  typeof res === 'string' ? res : res?.chat_text ?? res?.chatText ?? res?.text ?? res?.output ?? JSON.stringify(res ?? '')
 
 /** Starts a CREAO run, polls it to the end and returns the JSON block from its reply. */
 async function run(request: string, rs: Run): Promise<any> {
@@ -109,9 +110,10 @@ ${resume}`
 
 const draftRequest = (b: Brief, rep: string) => `MODE: FIND_AND_DRAFT
 You are Booth Brief. The candidate just talked to ${rep} at ${b.company}'s booth at the LA Hacks AI Hackathon 2026 at UCLA.
-1. Find ${rep}'s work email with Apollo.io: in your sandbox, call POST https://api.apollo.io/api/v1/people/match with header "x-api-key: $APOLLO_API_KEY" (secret env var) and JSON {"name": "${rep}", "organization_name": "${b.company}", "reveal_personal_emails": false}. If there is no match, search https://api.apollo.io/api/v1/mixed_people/api_search for the company (it returns ids but no emails), pick the closest name, then call people/match with {"id": <that person id>}.
+1. Find ${rep}'s work email with Apollo.io: in your sandbox, call POST https://api.apollo.io/api/v1/people/match with header "x-api-key: ${apolloKey}" and JSON {"name": "${rep}", "organization_name": "${b.company}", "reveal_personal_emails": false}. If there is no match, search https://api.apollo.io/api/v1/mixed_people/api_search for the company (it returns ids but no emails), pick the closest name, then call people/match with {"id": <that person id>}.
 2. Write a short follow-up email (under 120 words, no em dashes, plain and specific) from the candidate to ${rep}, referencing ${JSON.stringify(b.points)} and the role "${b.role}".
 Do NOT send anything. Return ONLY a json code block:
+Nothing is attached to the email, so do not mention an attachment.
 {"email":"found address or empty","apolloName":"name on the Apollo record","subject":"","body":""}
 Candidate resume:
 ${resume}`
@@ -121,7 +123,7 @@ Send this email now with the connected Gmail account, exactly as written, to ${f
 Subject: ${f.subject}
 Body:
 ${f.body}
-Then return ONLY a json code block: {"sent":true,"to":"${f.to}"}`
+Then return ONLY a json code block: {"sent":true,"to":"${f.to}"}, or {"sent":false,"error":"why"} if it was not sent.`
 
 async function prep() {
   const rs: Run = (state.prep = { status: 'pending', startedAt: Date.now() })
@@ -158,6 +160,7 @@ async function draft(company: string, heard: string) {
   save()
   try {
     const out = (await run(draftRequest(b, f.rep), rs)) as { email?: string; subject: string; body: string }
+    if (!out?.subject || !out?.body) throw new Error('CREAO returned no draft')
     Object.assign(f, { email: out.email || undefined, subject: out.subject, body: out.body })
     f.to = sendToRep ? f.email : testEmail
     if (!f.to) throw new Error(sendToRep ? 'Apollo found no email' : 'set TEST_EMAIL')
@@ -180,7 +183,8 @@ async function send(company: string) {
   f.runs.push(rs)
   save()
   try {
-    await run(sendRequest(f), rs)
+    const out = (await run(sendRequest(f), rs)) as { sent?: boolean; error?: string }
+    if (out?.sent !== true) throw new Error(out?.error ?? 'CREAO did not confirm the send')
     f.phase = 'sent'
   } catch (e) {
     f.phase = 'failed'

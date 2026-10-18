@@ -23,7 +23,7 @@ On agent.creao.ai create one agent with a single text input named `request`, con
 
 ## Run
 
-1. `cd server && cp .env.example .env`, fill in `CREAO_API_KEY` (account key, cr_sk_) and `APOLLO_API_KEY`, run `npm run setup` (creates the agent, stores the Apollo key as a CREAO secret) and set the printed `CREAO_AGENT_ID`. Also fill `TEST_EMAIL`, `DEEPGRAM_API_KEY`, then `npm install && npm start`.
+1. `cd server && cp .env.example .env`, fill in `CREAO_API_KEY` (Developer Platform project key from developer.creao.ai > API keys) and `APOLLO_API_KEY`, run `npm run setup` (creates the hosted Booth Brief agent) and set the printed `CREAO_AGENT_ID`. Connect Gmail for the agent so it can send. The Apollo key is passed to CREAO in each lookup request, since `/v2` has no secrets store yet. Also fill `TEST_EMAIL`, `DEEPGRAM_API_KEY`, then `npm install && npm start`.
 2. `cd lens && npm install && npm run dev`, then `npm run qr` and scan it in the Even Realities app (or `npm run simulate`).
 3. Open `http://localhost:8790` and press "Research sponsors with CREAO". Briefs appear on the dashboard and lens when the run finishes.
 
