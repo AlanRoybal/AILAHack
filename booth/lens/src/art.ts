@@ -206,6 +206,10 @@ export function title(text: string, widths: number[]): Promise<number[][]> {
   let size = 40
   do g.font = `700 ${size}px ${FONT}`
   while (g.measureText(text).width > TITLE_W - 4 && --size > 26)
+  if (g.measureText(text).width > TITLE_W - 4) {
+    while (text.length > 1 && g.measureText(`${text}…`).width > TITLE_W - 4) text = text.slice(0, -1)
+    text = `${text.trimEnd()}…`
+  }
   g.fillStyle = FULL
   g.textBaseline = 'alphabetic'
   g.fillText(text, 0, 42)
