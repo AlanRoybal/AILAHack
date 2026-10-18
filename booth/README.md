@@ -15,15 +15,17 @@ lens countdown, tilt left-right cancels ──▶ CREAO (calls the AWS mailer) �
 
 - `server/` Node server. Starts CREAO runs, polls them, keeps state, serves the dashboard at `http://localhost:8790`.
 - `server/data/` `resume.txt` (your resume as plain text, gitignored), `sponsors.json` (LA Hacks AI Hackathon 2026 sponsors), `reps.json` (known booth staff per sponsor; spoken names are matched against it).
-- `lens/` Even Hub app. One text container; the dev server proxies `/api` to the server.
+- `lens/` Even Hub app. Each screen is a 144px icon tile and a bold title drawn as images (`src/art.ts`) plus three text containers for detail and hints (`src/main.ts`); the dev server proxies `/api` to the server.
 
 ## CREAO agent setup
 
-`npm run setup` creates one hosted agent on the CREAO Developer Platform with write actions on full auto (API runs cannot stop for approval). The server sends it a `MODE: PREP_BRIEFS`, `MODE: FIND_AND_DRAFT` or `MODE: SEND_EMAIL` request and reads the JSON block from the reply. Hosted `/v2` agents have no Gmail connector, so for `SEND_EMAIL` the agent calls the Booth Brief mailer (below) from its sandbox.
+The agent is **Booth Brief** on agent.creao.ai (agent ID `f98b8927-e54e-4c80-baa1-2183e197d417`), with one text input `request` and autonomy set to Auto, since API runs cannot stop for approval. The server runs it through the agent's API Trigger (`capi_` key) and sends a `MODE: PREP_BRIEFS`, `MODE: FIND_AND_DRAFT` or `MODE: SEND_EMAIL` request, then reads the JSON block from the reply. For `SEND_EMAIL` the agent calls the Booth Brief mailer (below) from its sandbox. Runs show up under the agent's Recent runs.
+
+`npm run setup` instead creates an equivalent hosted agent on the CREAO Developer Platform when `CREAO_API_KEY` is a `cr_sk_` project key.
 
 ## Run
 
-1. `cd server && cp .env.example .env`, fill in `CREAO_API_KEY` (Developer Platform project key from developer.creao.ai > API keys) and `APOLLO_API_KEY`, run `npm run setup` (creates the hosted Booth Brief agent) and set the printed `CREAO_AGENT_ID`. Deploy the mailer and set `MAILER_URL` and `MAILER_TOKEN`. The Apollo key is passed to CREAO in each lookup request, since `/v2` has no secrets store yet. Also fill `TEST_EMAIL`, `DEEPGRAM_API_KEY`, then `npm install && npm start`.
+1. `cd server && cp .env.example .env`, set `CREAO_AGENT_ID` to the agent ID, `CREAO_API_KEY` to a key from the agent's API Trigger panel, and `APOLLO_API_KEY`. Deploy the mailer and set `MAILER_URL` and `MAILER_TOKEN`. The Apollo key is passed to CREAO in each lookup request. Also fill `TEST_EMAIL`, `DEEPGRAM_API_KEY`, then `npm install && npm start`.
 2. `cd lens && npm install && npm run dev`, then `npm run qr` and scan it in the Even Realities app (or `npm run simulate`).
 3. Open `http://localhost:8790` and press "Research sponsors with CREAO". Briefs appear on the dashboard and lens when the run finishes.
 
