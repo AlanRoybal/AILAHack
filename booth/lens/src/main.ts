@@ -9,13 +9,15 @@ import {
   TextContainerUpgrade,
   waitForEvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
-import { TILE, TITLE_H, TITLE_W, tile, title, type Icon } from './art.ts'
+import { HINT_H, HINT_W, TILE, TITLE_H, TITLE_W, hints, tile, title, type Icon } from './art.ts'
 import { Tilt } from './tilt.ts'
 
 interface Brief { company: string; match: number; role: string; rep: string; points: string[] }
 interface Followup { phase: string; heard: string; rep: string; matched: boolean; to?: string; sendAt?: number; error?: string }
 interface State { briefs: Brief[]; prep?: { endedAt?: number; error?: string }; followups: Record<string, Followup>; now: number }
-interface View { icon: Icon; title: string; sub: string; detail?: string; hint?: string }
+type Hint = [gesture: string, action: string]
+interface View { icon: Icon; title: string; sub: string; detail?: string; hint?: Hint[] }
+const BACK: Hint = ['Double tap', 'back']
 
 const LISTEN_MS = 5000
 const CANCEL_GAP_MS = 2500
@@ -25,7 +27,7 @@ const warn = (what: string) => (err: unknown) => console.warn(`${what} failed`, 
 
 let state: State = { briefs: [], followups: {}, now: Date.now() }
 let skew = 0
-let screen: 'list' | 'brief' | 'listen' = 'list'
+let screen: 'list' | 'brief' | 'ready' | 'listen' = 'list'
 let cursor = 0
 let point = 0
 let pcm: Uint8Array[] = []
@@ -60,7 +62,7 @@ function listView(b: Brief): View {
     title: b.company,
     sub: cut(b.role, 26),
     detail: [rep ? `Ask for ${cut(rep, 18)}` : '', sent ? 'Follow-up sent' : `${cursor + 1} of ${state.briefs.length}`].filter(Boolean).join('\n'),
-    hint: 'tap  brief        swipe  next',
+    hint: [['Tap', 'brief'], ['Swipe', 'next'], ['Double tap', 'exit']],
   }
 }
 
@@ -68,7 +70,7 @@ function followupView(b: Brief, f: Followup): View {
   const who = first(f.rep) || first(f.heard) || 'them'
   switch (f.phase) {
     case 'drafting':
-      return { icon: { kind: 'search' }, title: `Finding ${who}`, sub: 'Apollo + CREAO draft', detail: f.matched ? cut(person(f.rep), 24) : cut(`heard "${f.heard}"`, 26) }
+      return { icon: { kind: 'search' }, title: `Finding ${who}`, sub: 'Apollo + CREAO draft', detail: f.matched ? cut(person(f.rep), 24) : cut(`heard "${f.heard}"`, 26), hint: [BACK] }
     case 'countdown': {
       const s = Math.max(0, Math.min(COUNTDOWN_S, Math.ceil(((f.sendAt ?? 0) - (Date.now() + skew)) / 1000)))
       const tilted = Date.now() - leftAt < CANCEL_GAP_MS
@@ -77,28 +79,30 @@ function followupView(b: Brief, f: Followup): View {
         title: `Sending to ${who}`,
         sub: tilted ? 'now tilt right' : `in ${s}s`,
         detail: f.to ? cut(f.to, 26) : undefined,
-        hint: 'tilt  left, right   cancel',
+        hint: [['Tilt left, right', 'cancel']],
       }
     }
-    case 'sending': return { icon: { kind: 'sending' }, title: 'Sending', sub: `CREAO is emailing ${cut(who, 10)}`, detail: f.to ? cut(f.to, 26) : undefined }
-    case 'sent': return { icon: { kind: 'sent' }, title: 'Sent', sub: cut(person(f.rep) || who, 24), detail: f.to ? cut(f.to, 26) : undefined, hint: 'double tap  back' }
-    case 'cancelled': return { icon: { kind: 'moon' }, title: 'Not sent', sub: 'Cancelled', detail: `${cut(who, 12)} gets nothing`, hint: 'tap  redo' }
-    default: return { icon: { kind: 'failed', letter: initial(who) }, title: "Didn't send", sub: cut(b.company, 24), detail: cut(f.error ?? 'Unknown error', 44), hint: 'tap  retry' }
+    case 'sending': return { icon: { kind: 'sending' }, title: 'Sending', sub: `CREAO is emailing ${cut(who, 10)}`, detail: f.to ? cut(f.to, 26) : undefined, hint: [BACK] }
+    case 'sent': return { icon: { kind: 'sent' }, title: 'Sent', sub: cut(person(f.rep) || who, 24), detail: f.to ? cut(f.to, 26) : undefined, hint: [BACK] }
+    case 'cancelled': return { icon: { kind: 'moon' }, title: 'Not sent', sub: 'Cancelled', detail: `${cut(who, 12)} gets nothing`, hint: [['Tap', 'redo'], BACK] }
+    default: return { icon: { kind: 'failed', letter: initial(who) }, title: "Didn't send", sub: cut(b.company, 24), detail: cut(f.error ?? 'Unknown error', 44), hint: [['Tap', 'retry'], BACK] }
   }
 }
 
 function briefView(b: Brief): View {
-  if (screen === 'listen') return { icon: { kind: 'mic' }, title: 'Say their name', sub: 'Listening', detail: cut(b.company, 24), hint: 'tap  done' }
+  if (screen === 'listen') return { icon: { kind: 'mic' }, title: 'Say their name', sub: 'Listening', detail: cut(b.company, 24), hint: [['Tap', 'done']] }
   const f = followup()
   if (f) return followupView(b, f)
   const rep = person(b.rep)
+  if (screen === 'ready')
+    return { icon: { kind: 'rep', letter: initial(rep || b.company) }, title: b.company, sub: rep ? `Talking to ${cut(rep, 16)}?` : 'Talking to a rep?', detail: 'Tap after, then say their name', hint: [['Tap', 'say name'], BACK] }
   const n = b.points.length
   return {
     icon: { kind: 'rep', letter: initial(rep || b.company) },
     title: b.company,
     sub: rep ? `Ask for ${cut(rep, 18)}` : cut(b.role, 26),
     detail: n ? `${(point % n) + 1}/${n}  ${cut(b.points[point % n], 40)}` : undefined,
-    hint: 'swipe  point      tap  met them',
+    hint: [['Swipe', 'next point'], ['Tap', 'done'], BACK],
   }
 }
 
@@ -110,11 +114,11 @@ const IMG = {
   tile: { id: 1, name: 'tile', x: 16, y: 72, w: TILE, h: TILE },
   titleA: { id: 2, name: 'titleA', x: 184, y: 58, w: 288, h: TITLE_H },
   titleB: { id: 3, name: 'titleB', x: 472, y: 58, w: TITLE_W - 288, h: TITLE_H },
+  hint: { id: 6, name: 'hint', x: 184, y: 214, w: HINT_W, h: HINT_H },
 }
 const TXT = {
   sub: { id: 4, name: 'sub', x: 180, y: 110, w: 392, h: 44, color: 4 },
   detail: { id: 5, name: 'detail', x: 180, y: 142, w: 392, h: 66, color: 2 },
-  hint: { id: 6, name: 'hint', x: 180, y: 222, w: 360, h: 44, color: 1 },
 }
 
 const bridge = await waitForEvenAppBridge()
@@ -154,7 +158,7 @@ function put(key: string, value: string, job: () => Promise<unknown>) {
 
 async function render() {
   const v = view()
-  $('lens').textContent = [v.title, v.sub, v.detail, v.hint].filter(Boolean).join('\n')
+  $('lens').textContent = [v.title, v.sub, v.detail, v.hint?.map(h => h.join(' ')).join('   ')].filter(Boolean).join('\n')
   put('tile', JSON.stringify(v.icon), async () =>
     bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: IMG.tile.id, containerName: IMG.tile.name, imageData: await tile(v.icon) })),
   )
@@ -163,7 +167,10 @@ async function render() {
     await bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: IMG.titleA.id, containerName: IMG.titleA.name, imageData: a }))
     await bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: IMG.titleB.id, containerName: IMG.titleB.name, imageData: b }))
   })
-  for (const k of ['sub', 'detail', 'hint'] as const) {
+  put('hint', JSON.stringify(v.hint ?? []), async () =>
+    bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: IMG.hint.id, containerName: IMG.hint.name, imageData: await hints(v.hint ?? []) })),
+  )
+  for (const k of ['sub', 'detail'] as const) {
     const content = v[k] || ' '
     put(k, content, () => bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: TXT[k].id, containerName: TXT[k].name, content })))
   }
@@ -189,7 +196,7 @@ function startListen() {
 async function stopListen() {
   clearTimeout(listenTimer)
   bridge.audioControl(false, AudioInputSource.Glasses).catch(warn('audio'))
-  screen = 'brief'
+  screen = 'ready'
   const len = pcm.reduce((n, c) => n + c.length, 0)
   const body = new Uint8Array(len)
   pcm.reduce((o, c) => (body.set(c, o), o + c.length), 0)
@@ -201,7 +208,7 @@ async function sendTypedName(name: string) {
   if (!brief() || !name.trim()) return
   clearTimeout(listenTimer)
   bridge.audioControl(false, AudioInputSource.Glasses).catch(warn('audio'))
-  screen = 'brief'
+  screen = 'ready'
   await api('/name', { body: JSON.stringify({ text: name }), headers: { 'content-type': 'application/json' } })
   await poll()
 }
@@ -245,7 +252,7 @@ bridge.onEvenHubEvent(event => {
   const is = (t: OsEventTypeList) => sys === t || txt === t
   if (is(OsEventTypeList.DOUBLE_CLICK_EVENT)) {
     if (screen === 'listen') return void stopListen()
-    if (screen === 'brief') screen = 'list'
+    if (screen === 'brief' || screen === 'ready') screen = 'list'
     else bridge.shutDownPageContainer(1)
   } else if (txt === OsEventTypeList.SCROLL_TOP_EVENT || txt === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
     const step = txt === OsEventTypeList.SCROLL_TOP_EVENT ? -1 : 1
@@ -257,9 +264,10 @@ bridge.onEvenHubEvent(event => {
   else if (is(OsEventTypeList.CLICK_EVENT)) {
     if (screen === 'list' && state.briefs.length) screen = 'brief'
     else if (screen === 'listen') return void stopListen()
-    else if (screen === 'brief') {
+    else {
       const f = followup()
-      if (!f || f.phase === 'cancelled' || f.phase === 'failed') startListen()
+      if (f ? f.phase === 'cancelled' || f.phase === 'failed' : screen === 'ready') startListen()
+      else if (!f) screen = 'ready'
     }
   } else return
   void render()

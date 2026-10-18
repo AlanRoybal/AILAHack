@@ -223,3 +223,41 @@ export function title(text: string, widths: number[]): Promise<number[][]> {
     }),
   )
 }
+
+export const HINT_W = 288
+export const HINT_H = 64
+
+/** Action hints as outlined buttons: bold gesture, dim action. Wraps to a second row. */
+export function hints(items: [string, string][]): Promise<number[]> {
+  const [c, g] = canvas(HINT_W, HINT_H)
+  const H = 26
+  const PAD = 9
+  let x = 1
+  let y = 2
+  for (const [gesture, action] of items) {
+    g.font = `700 15px ${FONT}`
+    const gw = g.measureText(gesture).width
+    g.font = `500 15px ${FONT}`
+    const aw = g.measureText(action).width
+    const w = Math.ceil(PAD + gw + 6 + aw + PAD)
+    if (x > 1 && x + w > HINT_W - 1) {
+      x = 1
+      y += H + 8
+    }
+    g.beginPath()
+    g.roundRect(x, y, w, H, H / 2)
+    g.lineWidth = 2
+    g.strokeStyle = DIM
+    g.stroke()
+    g.textBaseline = 'middle'
+    g.textAlign = 'left'
+    g.font = `700 15px ${FONT}`
+    g.fillStyle = FULL
+    g.fillText(gesture, x + PAD, y + H / 2 + 1)
+    g.font = `500 15px ${FONT}`
+    g.fillStyle = DIM
+    g.fillText(action, x + PAD + gw + 6, y + H / 2 + 1)
+    x += w + 8
+  }
+  return png(c)
+}

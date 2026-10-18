@@ -104,7 +104,7 @@ function lastJson(text: string): unknown {
 const prepRequest = () => `MODE: PREP_BRIEFS
 You are Booth Brief. The candidate below is at the LA Hacks AI Hackathon 2026 at UCLA and will walk the sponsor booths.
 For EACH sponsor: research the web for current open roles (internships or new grad) that fit this resume, recent company news from the last 3 months, and who from the company is at the event. Known booth staff: ${JSON.stringify(reps)}. Score fit 0-100 against the resume.
-Write 3 talking points per sponsor, each under 32 characters, that connect a specific resume item to the company. No em dashes.
+Write 3 talking points per sponsor. Each pairs one specific resume item with a specific need from that sponsor's open role or product, written as "<resume item> → <their need>", under 40 characters. Use different resume items for different sponsors where possible, and never repeat a point across sponsors. No em dashes.
 Return ONLY one JSON object in a json code block:
 {"briefs":[{"company":"","match":0,"role":"best-fit open role, under 30 chars","rep":"who to ask for, under 24 chars","points":["","",""],"why":"one sentence on the fit"}]}
 SPONSORS: ${JSON.stringify(sponsors)}
