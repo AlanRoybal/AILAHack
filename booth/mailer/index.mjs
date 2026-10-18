@@ -1,6 +1,6 @@
 // Lambda (function URL), all with "Authorization: Bearer $SEND_TOKEN":
 // POST /send {to, subject, body} sends through Gmail. POST /hold {to, subject, body} returns a signed ticket
-// without sending; POST /release {ticket} sends the held email.
+// without sending; POST /release {ticket, to, subject, body} sends it if it matches what was held.
 import { createHmac, timingSafeEqual } from 'node:crypto'
 const { CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN, SEND_TOKEN, ALLOWED_TO = '' } = process.env
 
@@ -30,21 +30,22 @@ export async function handler(event) {
   } catch {
     return reply(400, { error: 'invalid json' })
   }
-  if (route === '/release') {
-    const [p = '', sig = ''] = String(msg?.ticket ?? '').split('.')
-    const want = Buffer.from(sign(p))
-    if (!p || Buffer.from(sig).length !== want.length || !timingSafeEqual(Buffer.from(sig), want)) return reply(403, { error: 'bad ticket' })
-    msg = JSON.parse(Buffer.from(p, 'base64url').toString())
-    if (!(Date.now() - msg.at < HOLD_MS)) return reply(403, { error: 'ticket expired' })
-  }
   const { to, subject, body } = msg ?? {}
+  const seal = at => sign(JSON.stringify([to, subject, body, at]))
+  if (route === '/release') {
+    const [at = '', sig = ''] = String(msg?.ticket ?? '').split('.')
+    const want = Buffer.from(seal(Number(at)))
+    if (!/^\d+$/.test(at) || Buffer.from(sig).length !== want.length || !timingSafeEqual(Buffer.from(sig), want))
+      return reply(403, { error: 'bad ticket' })
+    if (!(Date.now() - Number(at) < HOLD_MS)) return reply(403, { error: 'ticket expired' })
+  }
   if (![to, subject, body].every(v => typeof v === 'string' && v.trim()) || /[\r\n]/.test(to + subject))
     return reply(400, { error: 'to, subject and body are required' })
   const allowed = ALLOWED_TO.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
   if (allowed.length && !allowed.includes(to.trim().toLowerCase())) return reply(403, { error: 'recipient not allowed' })
   if (route === '/hold') {
-    const p = b64url(JSON.stringify({ to, subject, body, at: Date.now() }))
-    return reply(200, { held: true, to, ticket: `${p}.${sign(p)}` })
+    const at = Date.now()
+    return reply(200, { held: true, to, ticket: `${at}.${seal(at)}` })
   }
   const raw = [`To: ${to}`, `Subject: ${header(subject)}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=UTF-8', '', body].join('\r\n')
   const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {

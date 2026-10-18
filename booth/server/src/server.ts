@@ -193,6 +193,18 @@ async function draft(company: string, heard: string) {
   save()
 }
 
+/** Sends the email CREAO queued with the mailer. Null (fall back to a CREAO send run) only when the mailer rejected it unsent. */
+async function release(f: Followup) {
+  if (!f.ticket) return null
+  const r = await fetch(`${mailerUrl.replace(/\/$/, '')}/release`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${mailerToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ticket: f.ticket, to: f.to, subject: f.subject, body: f.body }),
+  }).catch(() => null)
+  if (!r || (r.status >= 400 && r.status < 500)) return null
+  return r.json().catch(() => ({ error: `mailer returned ${r.status}` }))
+}
+
 async function send(company: string) {
   const f = state.followups[company]
   timers.delete(company)
@@ -202,12 +214,7 @@ async function send(company: string) {
   f.runs.push(rs)
   save()
   try {
-    const held = f.ticket && JSON.parse(Buffer.from(f.ticket.split('.')[0], 'base64url').toString())
-    const out = (
-      held?.to === f.to
-        ? await (await fetch(`${mailerUrl.replace(/\/$/, '')}/release`, { method: 'POST', headers: { Authorization: `Bearer ${mailerToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: f.ticket }) })).json()
-        : await run(sendRequest(f), rs)
-    ) as { sent?: boolean; error?: string }
+    const out = ((await release(f)) ?? (await run(sendRequest(f), rs))) as { sent?: boolean; error?: string }
     rs.endedAt ??= Date.now()
     if (out?.sent !== true) throw new Error(out?.error ?? 'CREAO did not confirm the send')
     f.phase = 'sent'
