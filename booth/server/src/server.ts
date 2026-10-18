@@ -6,6 +6,8 @@ const env = process.env
 const port = Number(env.PORT ?? 8790)
 const key = env.CREAO_API_KEY ?? ''
 const apolloKey = env.APOLLO_API_KEY ?? ''
+const mailerUrl = env.MAILER_URL ?? ''
+const mailerToken = env.MAILER_TOKEN ?? ''
 const appId = env.CREAO_APP_ID ?? ''
 const field = env.CREAO_INPUT_FIELD ?? 'request'
 const testEmail = env.TEST_EMAIL ?? ''
@@ -119,11 +121,10 @@ Candidate resume:
 ${resume}`
 
 const sendRequest = (f: Followup) => `MODE: SEND_EMAIL
-Send this email now with the connected Gmail account, exactly as written, to ${f.to}.
-Subject: ${f.subject}
-Body:
-${f.body}
-Then return ONLY a json code block: {"sent":true,"to":"${f.to}"}, or {"sent":false,"error":"why"} if it was not sent.`
+Send this email now, exactly as written, to ${f.to}, by calling the Booth Brief mail service from your sandbox:
+POST ${mailerUrl.replace(/\/$/, '')}/send with headers "Authorization: Bearer ${mailerToken}" and "Content-Type: application/json" and this JSON body:
+${JSON.stringify({ to: f.to, subject: f.subject, body: f.body })}
+Build the request body from that JSON unchanged. Then return ONLY a json code block: {"sent":true,"to":"${f.to}"}, or {"sent":false,"error":"the service's error"} if it did not return sent:true.`
 
 async function prep() {
   const rs: Run = (state.prep = { status: 'pending', startedAt: Date.now() })
