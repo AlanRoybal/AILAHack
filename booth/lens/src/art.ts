@@ -201,18 +201,24 @@ export function tile(icon: Icon): Promise<number[]> {
 }
 
 /** The title, shrunk to fit, cut into `widths` strips (image containers max out at 288 wide). */
-export function title(text: string, widths: number[]): Promise<number[][]> {
+export function titleOverflows(text: string) {
+  const [, g] = canvas(1, 1)
+  g.font = `700 26px ${FONT}`
+  return g.measureText(text).width > TITLE_W - 4
+}
+
+/** Bold title; if it still overflows at the smallest size it pans left by `tick`. */
+export function title(text: string, widths: number[], tick = 0): Promise<number[][]> {
   const [c, g] = canvas(TITLE_W, TITLE_H)
   let size = 40
   do g.font = `700 ${size}px ${FONT}`
   while (g.measureText(text).width > TITLE_W - 4 && --size > 26)
-  if (g.measureText(text).width > TITLE_W - 4) {
-    while (text.length > 1 && g.measureText(`${text}…`).width > TITLE_W - 4) text = text.slice(0, -1)
-    text = `${text.trimEnd()}…`
-  }
+  const over = g.measureText(text).width - (TITLE_W - 4)
+  const steps = Math.ceil(over / 24)
+  const off = over > 0 ? Math.min(over, Math.max(0, (tick % (steps + 6)) - 3) * 24) : 0
   g.fillStyle = FULL
   g.textBaseline = 'alphabetic'
-  g.fillText(text, 0, 42)
+  g.fillText(text, -off, 42)
   let x = 0
   return Promise.all(
     widths.map(w => {

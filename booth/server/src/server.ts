@@ -38,6 +38,7 @@ interface Followup {
   body?: string
   sendAt?: number
   error?: string
+  ticket?: string
   runs: Run[]
 }
 interface State { briefs: Brief[]; prep?: Run; followups: Record<string, Followup>; event?: { name: string; heard: string } }
@@ -117,9 +118,10 @@ const draftRequest = (b: Brief, rep: string) => `MODE: FIND_AND_DRAFT
 You are Booth Brief. The candidate just talked to ${rep} at ${b.company}'s booth at the ${eventFull()}.
 1. Find ${rep}'s work email with Apollo.io: in your sandbox, call POST https://api.apollo.io/api/v1/people/match with header "x-api-key: ${apolloKey}" and JSON {"name": "${rep}", "organization_name": "${b.company}", "reveal_personal_emails": false}. If there is no match, search https://api.apollo.io/api/v1/mixed_people/api_search for the company (it returns ids but no emails), pick the closest name, then call people/match with {"id": <that person id>}.
 2. Write a short follow-up email (under 120 words, no em dashes, plain and specific) from the candidate to ${rep}, referencing ${JSON.stringify(b.points)} and the role "${b.role}".
-Do NOT send anything. Return ONLY a json code block:
 Nothing is attached to the email, so do not mention an attachment.
-{"email":"found address or empty","apolloName":"name on the Apollo record","subject":"","body":""}
+3. Queue the email (it is NOT sent yet; the candidate gets a few seconds to cancel): POST ${mailerUrl.replace(/\/$/, '')}/hold with headers "Authorization: Bearer ${mailerToken}" and "Content-Type: application/json" and JSON {"to": "${sendToRep ? '<the work email you found>' : testEmail}", "subject": <your subject>, "body": <your body>}. It returns {"held":true,"ticket":"..."}.
+Return ONLY a json code block:
+{"email":"found address or empty","apolloName":"name on the Apollo record","subject":"","body":"","ticket":"the ticket from /hold, or empty"}
 Candidate resume:
 ${resume}`
 
@@ -176,8 +178,9 @@ async function draft(company: string, heard: string) {
   try {
     const hit = pre && (await pre)
     const out = (hit && hit.rep === f.rep && hit.out?.subject ? (f.runs.push(hit.rs), hit.out) : (f.runs.push(rs), await run(draftRequest(b, f.rep), rs))) as { email?: string; subject: string; body: string }
+    if (state.followups[company] !== f) return
     if (!out?.subject || !out?.body) throw new Error('CREAO returned no draft')
-    Object.assign(f, { email: out.email || undefined, subject: out.subject, body: out.body })
+    Object.assign(f, { email: out.email || undefined, subject: out.subject, body: out.body, ticket: (out as { ticket?: string }).ticket || undefined })
     f.to = sendToRep ? f.email : testEmail
     if (!f.to) throw new Error(sendToRep ? 'Apollo found no email' : 'set TEST_EMAIL')
     f.phase = 'countdown'
@@ -199,7 +202,13 @@ async function send(company: string) {
   f.runs.push(rs)
   save()
   try {
-    const out = (await run(sendRequest(f), rs)) as { sent?: boolean; error?: string }
+    const held = f.ticket && JSON.parse(Buffer.from(f.ticket.split('.')[0], 'base64url').toString())
+    const out = (
+      held?.to === f.to
+        ? await (await fetch(`${mailerUrl.replace(/\/$/, '')}/release`, { method: 'POST', headers: { Authorization: `Bearer ${mailerToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: f.ticket }) })).json()
+        : await run(sendRequest(f), rs)
+    ) as { sent?: boolean; error?: string }
+    rs.endedAt ??= Date.now()
     if (out?.sent !== true) throw new Error(out?.error ?? 'CREAO did not confirm the send')
     f.phase = 'sent'
   } catch (e) {
@@ -282,6 +291,15 @@ createServer(async (req, res) => {
     const company = u.searchParams.get('company') ?? ''
     if (!state.briefs.some(b => b.company === company)) return json(res, 404, { error: `no brief for ${company}` })
     if (path === '/cancel') return json(res, 200, { cancelled: cancel(company) })
+    if (path === '/reset') {
+      const f = state.followups[company]
+      if (f && f.phase !== 'sending' && f.phase !== 'sent') {
+        cancel(company)
+        delete state.followups[company]
+        save()
+      }
+      return json(res, 200, { ok: true })
+    }
     if (path === '/ready') return startPrefetch(company), json(res, 202, { ok: true })
     if (path === '/name') {
       const phase = state.followups[company]?.phase
@@ -292,6 +310,7 @@ createServer(async (req, res) => {
           ? String(JSON.parse(raw.toString()).text ?? '')
           : await transcribe(raw, (reps[company] ?? []).map(r => r.name))
       if (!heard.trim()) return json(res, 422, { error: 'no name heard' })
+      if (!matchRep(heard, reps[company] ?? []) && heard.trim().split(/\s+/).length > 3) return json(res, 422, { error: 'no name heard', heard })
       void draft(company, heard)
       return json(res, 202, { heard })
     }

@@ -9,7 +9,7 @@ import {
   TextContainerUpgrade,
   waitForEvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
-import { HINT_H, HINT_W, TILE, TITLE_H, TITLE_W, hints, tile, title, type Icon } from './art.ts'
+import { HINT_H, HINT_W, TILE, TITLE_H, TITLE_W, hints, tile, title, titleOverflows, type Icon } from './art.ts'
 import { Tilt } from './tilt.ts'
 
 interface Brief { company: string; match: number; role: string; rep: string; points: string[] }
@@ -36,9 +36,20 @@ let point = 0
 let pcm: Uint8Array[] = []
 let listenTimer = 0
 let leftAt = 0
+let nameMiss = ''
 let firstDir = 0
 
-const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '.' : s)
+let tick = 0
+let panning = false
+// Text that doesn't fit pans: hold at the start, step one character per tick, hold at the end.
+const cut = (s: string, n: number) => {
+  if (s.length <= n) return s
+  panning = true
+  const max = s.length - n
+  const pos = Math.min(max, Math.max(0, (tick % (max + 6)) - 3))
+  return s.slice(pos, pos + n)
+}
+const longTitle = (t: string) => titleOverflows(t) && (panning = true)
 const brief = () => state.briefs[cursor]
 const followup = () => (brief() ? state.followups[brief().company] : undefined)
 const BASE = (import.meta.env.VITE_BOOTH_URL as string | undefined) ?? ''
@@ -109,7 +120,7 @@ function briefView(b: Brief): View {
   if (f) return followupView(b, f)
   const rep = person(b.rep)
   if (screen === 'ready')
-    return { icon: { kind: 'rep', letter: initial(rep || b.company) }, title: b.company, sub: rep ? `Talking to ${cut(rep, 16)}?` : 'Talking to a rep?', detail: 'Tap after, then say their name', hint: [['Tap', 'say name'], BACK] }
+    return { icon: { kind: 'rep', letter: initial(rep || b.company) }, title: b.company, sub: rep ? `Talking to ${cut(rep, 16)}?` : 'Talking to a rep?', detail: nameMiss || 'Tap after, then say their name', hint: [['Tap', 'say name'], BACK] }
   const n = b.points.length
   return {
     icon: { kind: 'rep', letter: initial(rep || b.company) },
@@ -183,7 +194,7 @@ async function mirror(v: View) {
   const g = c.getContext('2d')!
   g.fillStyle = '#000'
   g.fillRect(0, 0, 576, 288)
-  const [ta, tb] = await title(v.title, [IMG.titleA.w, IMG.titleB.w])
+  const [ta, tb] = await title(v.title, [IMG.titleA.w, IMG.titleB.w], longTitle(v.title) ? tick : 0)
   g.drawImage(await toImg(await tile(v.icon)), IMG.tile.x, IMG.tile.y)
   g.drawImage(await toImg(ta), IMG.titleA.x, IMG.titleA.y)
   g.drawImage(await toImg(tb), IMG.titleB.x, IMG.titleB.y)
@@ -199,14 +210,16 @@ async function mirror(v: View) {
 }
 
 async function render() {
+  panning = false
   const v = view()
+  const tt = longTitle(v.title) ? tick : 0
   void mirror(v).catch(warn('mirror'))
   $('lens').textContent = [v.title, v.sub, v.detail, v.hint?.map(h => h.join(' ')).join('   ')].filter(Boolean).join('\n')
   put('tile', JSON.stringify(v.icon), async () =>
     bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: IMG.tile.id, containerName: IMG.tile.name, imageData: await tile(v.icon) })),
   )
-  put('title', v.title, async () => {
-    const [a, b] = await title(v.title, [IMG.titleA.w, IMG.titleB.w])
+  put('title', `${v.title}|${tt}`, async () => {
+    const [a, b] = await title(v.title, [IMG.titleA.w, IMG.titleB.w], tt)
     await bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: IMG.titleA.id, containerName: IMG.titleA.name, imageData: a }))
     await bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: IMG.titleB.id, containerName: IMG.titleB.name, imageData: b }))
   })
@@ -258,6 +271,7 @@ async function postEvent(init: RequestInit) {
 
 function startListen(kind: 'name' | 'event' = 'name') {
   listenFor = kind
+  nameMiss = ''
   screen = kind === 'event' ? 'eventListen' : 'listen'
   pcm = []
   bridge.audioControl(true, AudioInputSource.Glasses).catch(warn('audio'))
@@ -273,7 +287,10 @@ async function stopListen() {
   if (listenFor === 'event') return postEvent({ body, headers: { 'content-type': 'application/octet-stream' } })
   screen = 'ready'
   await render()
-  if (len) await api('/name', { body, headers: { 'content-type': 'application/octet-stream' } })
+  if (len && (await api('/name', { body, headers: { 'content-type': 'application/octet-stream' } })).status === 422) {
+    nameMiss = "Didn't catch a name, tap to retry"
+    await render()
+  }
 }
 
 async function sendTypedName(name: string) {
@@ -337,7 +354,12 @@ bridge.onEvenHubEvent(event => {
   const is = (t: OsEventTypeList) => sys === t || txt === t
   if (is(OsEventTypeList.DOUBLE_CLICK_EVENT)) {
     if (screen === 'listen' || screen === 'eventListen') return void stopListen()
-    if (screen === 'brief' || screen === 'ready' || screen === 'found') screen = 'list'
+    if (screen === 'brief' || screen === 'ready' || screen === 'found') {
+      const f = screen !== 'found' && followup()
+      if (f && f.phase !== 'sent' && f.phase !== 'sending') void api('/reset').then(poll)
+      nameMiss = ''
+      screen = 'list'
+    }
     else bridge.shutDownPageContainer(1)
   } else if (txt === OsEventTypeList.SCROLL_TOP_EVENT || txt === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
     const step = txt === OsEventTypeList.SCROLL_TOP_EVENT ? -1 : 1
@@ -384,3 +406,8 @@ setInterval(() => {
 
 await poll()
 setInterval(poll, 1000)
+setInterval(() => {
+  if (!panning) return
+  tick++
+  void render()
+}, 500)
