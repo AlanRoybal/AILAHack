@@ -11,6 +11,12 @@ tap, say name ──▶ /api/name (Deepgram, match reps.json) ──▶ CREAO (A
 lens countdown, tilt left-right cancels ──▶ CREAO (calls the AWS mailer) ──▶ inbox
 ```
 
+## CREAO agent
+
+- Agent ID: `f98b8927-e54e-4c80-baa1-2183e197d417`
+- Agent link: https://agent.creao.ai/install/f98b8927-e54e-4c80-baa1-2183e197d417?version=a08e7bc0-7160-42c2-8eef-56d08867e200
+- Run link (sponsor research run that ranked CREAO AI first): https://agent.creao.ai/share/43936a05a4fa907a77314e5a20d85570
+
 ## Layout
 
 - `server/` Node server. Starts CREAO runs, polls them, keeps state, serves the dashboard at `http://localhost:8790`.
