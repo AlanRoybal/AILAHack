@@ -14,6 +14,7 @@ const testEmail = env.TEST_EMAIL ?? ''
 const sendToRep = env.SEND_TO_REP === '1'
 const deepgramKey = env.DEEPGRAM_API_KEY ?? ''
 const countdownMs = Number(env.COUNTDOWN_MS ?? 8000)
+const boothToken = env.BOOTH_TOKEN ?? ''
 const base = env.CREAO_BASE_URL ?? 'https://agent.creao.ai/api/v1/apps'
 
 const dataDir = new URL('../data/', import.meta.url)
@@ -204,8 +205,13 @@ function cancel(company: string) {
   return true
 }
 
+const cors = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'content-type, x-booth-token',
+}
 const json = (res: ServerResponse, code: number, body: unknown) => {
-  res.writeHead(code, { 'Content-Type': 'application/json' })
+  res.writeHead(code, { 'Content-Type': 'application/json', ...cors })
   res.end(JSON.stringify(body))
 }
 const readRaw = (req: IncomingMessage) =>
@@ -218,6 +224,9 @@ const readRaw = (req: IncomingMessage) =>
 createServer(async (req, res) => {
   const u = new URL(req.url ?? '/', 'http://x')
   const path = u.pathname.replace(/^\/api/, '')
+  if (req.method === 'OPTIONS') return res.writeHead(204, cors).end()
+  // Requests through the public tunnel must carry the lens token.
+  if (boothToken && req.headers['cf-connecting-ip'] && req.headers['x-booth-token'] !== boothToken) return json(res, 401, { error: 'bad token' })
   try {
     if (u.pathname === '/') {
       res.writeHead(200, { 'Content-Type': 'text/html' })

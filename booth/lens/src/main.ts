@@ -35,7 +35,11 @@ let leftAt = 0
 const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '.' : s)
 const brief = () => state.briefs[cursor]
 const followup = () => (brief() ? state.followups[brief().company] : undefined)
-const api = (path: string, init?: RequestInit) => fetch(`/api${path}?company=${encodeURIComponent(brief().company)}`, { method: 'POST', ...init })
+const BASE = (import.meta.env.VITE_BOOTH_URL as string | undefined) ?? ''
+const TOKEN = (import.meta.env.VITE_BOOTH_TOKEN as string | undefined) ?? ''
+const call = (path: string, init?: RequestInit) =>
+  fetch(`${BASE}/api${path}`, { ...init, headers: { ...(init?.headers as Record<string, string>), ...(TOKEN ? { 'x-booth-token': TOKEN } : {}) } })
+const api = (path: string, init?: RequestInit) => call(`${path}?company=${encodeURIComponent(brief().company)}`, { method: 'POST', ...init })
 const person = (rep: string) => (/^unknown$/i.test(rep.trim()) ? '' : rep.split(',')[0].trim())
 const first = (rep: string) => person(rep).split(/\s+/)[0] ?? ''
 const initial = (s: string) => (s.trim()[0] ?? '?').toUpperCase()
@@ -167,7 +171,7 @@ async function render() {
 
 async function poll() {
   try {
-    state = await (await fetch('/api/state')).json()
+    state = await (await call('/state')).json()
     skew = state.now - Date.now()
     cursor = Math.min(cursor, Math.max(0, state.briefs.length - 1))
   } catch {}

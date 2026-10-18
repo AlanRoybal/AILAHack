@@ -33,6 +33,7 @@ The agent is **Booth Brief** on agent.creao.ai (agent ID `f98b8927-e54e-4c80-baa
 
 1. `cd server && cp .env.example .env`, set `CREAO_AGENT_ID` to the agent ID, `CREAO_API_KEY` to a key from the agent's API Trigger panel, and `APOLLO_API_KEY`. Deploy the mailer and set `MAILER_URL` and `MAILER_TOKEN`. The Apollo key is passed to CREAO in each lookup request. Also fill `TEST_EMAIL`, `DEEPGRAM_API_KEY`, then `npm install && npm start`.
 2. `cd lens && npm install && npm run dev`, then `npm run qr` and scan it in the Even Realities app (or `npm run simulate`).
+   For an Even Hub build, expose the server (`cloudflared tunnel --url http://localhost:8790`), set `BOOTH_TOKEN` in `server/.env`, add the tunnel URL to the `network` whitelist in `app.json`, then `VITE_BOOTH_URL=<tunnel URL> VITE_BOOTH_TOKEN=<token> npm run pack` and upload `booth-brief.ehpk` on hub.evenrealities.com. Requests through the tunnel without the token get 401.
 3. Open `http://localhost:8790` and press "Research sponsors with CREAO". Briefs appear on the dashboard and lens when the run finishes.
 
 ## Lens controls

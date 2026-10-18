@@ -14,8 +14,12 @@
     {
       "name": "network",
       "desc": "Loads sponsor briefs from the Booth Brief server and asks it to send follow-ups.",
-      "whitelist": []
+      "whitelist": [
+        "https://fixes-pour-outstanding-cohen.trycloudflare.com"
+      ]
     }
   ],
-  "supported_languages": ["en"]
+  "supported_languages": [
+    "en"
+  ]
 }
