@@ -27,7 +27,7 @@ Return JSON: {"actions":[...],"status":"continue"|"done"|"need_user","message":"
 Actions: {"a":"click","id":N} | {"a":"type","id":N,"text":"...","enter":bool} | {"a":"select","id":N,"value":"option text"} | {"a":"key","key":"Enter|Escape|Tab"} | {"a":"scroll","dy":600} | {"a":"goto","url":"..."}
 Batch several actions per turn when confident. Be fast. If an action fails twice, try another way (Escape closes overlays).
 Never submit a payment or the final reservation button; stop with need_user right before it.
-Today is ${new Date().toDateString()}.`
+Today is ${new Date().toLocaleDateString('en-US', { timeZone: config.tz, weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}.`
 
 type Action = { a: string; id?: number; text?: string; enter?: boolean; value?: string; key?: string; dy?: number; url?: string }
 interface Reply {

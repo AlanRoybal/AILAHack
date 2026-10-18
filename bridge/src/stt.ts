@@ -8,6 +8,9 @@ type Listener = (text: string, final: boolean) => void
  * request. Interim results are forwarded too: the detector can start on them
  * before the speaker finishes.
  */
+// Words the demo depends on, so Deepgram doesn't hear "Friday" as "Fry".
+const KEYTERMS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'tonight', 'tomorrow', 'next week', 'dinner', 'lunch', 'coffee', 'book us', 'table', 'reservation', 'slides', 'deck', 'chart', 'send me']
+
 export class LiveStt {
   private ws: WebSocket | null = null
   private pending: Buffer[] = []
@@ -32,6 +35,7 @@ export class LiveStt {
       smart_format: 'true',
       punctuate: 'true',
     })
+    for (const k of KEYTERMS) params.append('keyterm', k)
     const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${params}`, { headers: { Authorization: `Token ${config.deepgramKey}` } })
     this.ws = ws
     ws.on('open', () => {

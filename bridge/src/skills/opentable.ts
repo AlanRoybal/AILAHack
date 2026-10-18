@@ -119,7 +119,7 @@ export function bookingJob(id: string, title: string, p: BookingParams): Job {
       } catch {
         if (ctx.signal.aborted) return { phase: 'failed', text: 'Cancelled' }
         ctx.progress('Finding a table')
-        const r = await runLoop(page, `On OpenTable, reserve ${p.party} people at ${slotLabel(min)} on ${p.when.slice(0, 10)} for "${p.query}" near ${p.area ?? config.city}. Stop on the "Complete reservation" page.`, { signal: ctx.signal, onStep: ctx.progress })
+        const r = await runLoop(page, `On OpenTable, reserve ${p.party} people at ${slotLabel(min)} on ${p.when.slice(0, 10)} ${p.query ? `for "${p.query}" ` : ''}near ${p.area ?? config.city}. Stop on the "Complete reservation" page.`, { signal: ctx.signal, onStep: ctx.progress })
         if (r.status === 'gave_up') return { phase: 'failed', text: r.message }
       }
       const shown = await page.locator('[data-test="restaurantName"]').first().innerText({ timeout: 1500 }).catch(() => '')
