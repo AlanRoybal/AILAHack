@@ -19,11 +19,11 @@ lens countdown, tilt left-right cancels ──▶ CREAO (send via Gmail) ──�
 
 ## CREAO agent setup
 
-On agent.creao.ai create one agent with a single text input named `request`, connect Gmail, add an Apollo.io API key as the secret `APOLLO_API_KEY`, and set write actions to Auto (API runs cannot stop for approval). The server sends it a `MODE: PREP_BRIEFS`, `MODE: FIND_AND_DRAFT` or `MODE: SEND_EMAIL` request and reads the JSON block from the reply. Copy the agent id and an API Trigger key (`capi_...`).
+On agent.creao.ai create one agent with a single text input named `request`, connect Gmail and set write actions to Auto (API runs cannot stop for approval). The server sends it a `MODE: PREP_BRIEFS`, `MODE: FIND_AND_DRAFT` or `MODE: SEND_EMAIL` request and reads the JSON block from the reply. Copy the agent id and an API Trigger key (`capi_...`).
 
 ## Run
 
-1. `cd server && cp .env.example .env`, fill in `CREAO_API_KEY`, `CREAO_APP_ID`, `TEST_EMAIL`, `DEEPGRAM_API_KEY`, then `npm install && npm start`.
+1. `cd server && cp .env.example .env`, fill in `CREAO_API_KEY` (account key, cr_sk_) and `APOLLO_API_KEY`, run `npm run setup` (creates the agent, stores the Apollo key as a CREAO secret) and set the printed `CREAO_AGENT_ID`. Also fill `TEST_EMAIL`, `DEEPGRAM_API_KEY`, then `npm install && npm start`.
 2. `cd lens && npm install && npm run dev`, then `npm run qr` and scan it in the Even Realities app (or `npm run simulate`).
 3. Open `http://localhost:8790` and press "Research sponsors with CREAO". Briefs appear on the dashboard and lens when the run finishes.
 

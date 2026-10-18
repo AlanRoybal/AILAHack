@@ -42,31 +42,46 @@ const save = () => writeFileSync(stateFile, JSON.stringify(state, null, 1))
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const timers = new Map<string, NodeJS.Timeout>()
 
-async function creao(path: string, init?: RequestInit) {
-  if (!key || !appId) throw new Error('set CREAO_API_KEY and CREAO_APP_ID')
-  const r = await fetch(`${base}/${appId}/runs${path}`, {
-    ...init,
+const account = key.startsWith('cr_sk_')
+const agentId = env.CREAO_AGENT_ID ?? appId
+const devBase = env.CREAO_DEV_URL ?? 'https://developer.creao.ai/v1'
+
+interface CreaoRun { status: string; result?: unknown; error?: string }
+
+/** Account keys (cr_sk_) use developer.creao.ai/v1/runs; agent keys (capi_) use the app-scoped API Trigger. */
+async function creao(runId: string | null, input?: Record<string, string>): Promise<CreaoRun & { id: string }> {
+  if (!key || !agentId) throw new Error('set CREAO_API_KEY and CREAO_AGENT_ID')
+  const url = account
+    ? `${devBase}/runs${runId ? `/${runId}` : ''}`
+    : `${base}/${agentId}/runs${runId ? `/${runId}` : ''}`
+  const body = input && JSON.stringify(account ? { agent_id: agentId, input } : { inputs: input })
+  const r = await fetch(url, {
+    method: input ? 'POST' : 'GET',
+    body,
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
   })
-  const body = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error(`CREAO ${r.status} ${JSON.stringify(body)}`)
-  return body as { id: string; status: string; result?: { text?: string; chatText?: string }; errorCode?: string }
+  const j: any = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(`CREAO ${r.status} ${JSON.stringify(j)}`)
+  return { id: j.run_id ?? j.id, status: j.status, result: j.result, error: j.error?.code ?? j.errorCode }
 }
+
+const resultText = (res: any): string =>
+  typeof res === 'string' ? res : res?.text ?? res?.chatText ?? res?.output ?? JSON.stringify(res ?? '')
 
 /** Starts a CREAO run, polls it to the end and returns the JSON block from its reply. */
 async function run(request: string, rs: Run): Promise<any> {
-  const started = await creao('', { method: 'POST', body: JSON.stringify({ inputs: { [field]: request } }) })
+  const started = await creao(null, { [field]: request })
   rs.id = started.id
   rs.status = started.status
   save()
   for (;;) {
     await new Promise(r => setTimeout(r, 3000))
-    const r = await creao(`/${rs.id}`)
+    const r = await creao(rs.id!)
     rs.status = r.status
     if (!['completed', 'failed', 'cancelled'].includes(r.status)) continue
     rs.endedAt = Date.now()
-    if (r.status !== 'completed') throw new Error(r.errorCode ?? r.status)
-    return lastJson(r.result?.text ?? r.result?.chatText ?? '')
+    if (r.status !== 'completed') throw new Error(r.error ?? r.status)
+    return lastJson(resultText(r.result))
   }
 }
 
@@ -94,7 +109,7 @@ ${resume}`
 
 const draftRequest = (b: Brief, rep: string) => `MODE: FIND_AND_DRAFT
 You are Booth Brief. The candidate just talked to ${rep} at ${b.company}'s booth at the LA Hacks AI Hackathon 2026 at UCLA.
-1. Find ${rep}'s work email with Apollo.io: in your sandbox, call POST https://api.apollo.io/api/v1/people/match with header "x-api-key: $APOLLO_API_KEY" (secret env var) and JSON {"name": "${rep}", "organization_name": "${b.company}", "reveal_personal_emails": false}. If there is no match, search https://api.apollo.io/api/v1/mixed_people/search for the company and pick the closest name.
+1. Find ${rep}'s work email with Apollo.io: in your sandbox, call POST https://api.apollo.io/api/v1/people/match with header "x-api-key: $APOLLO_API_KEY" (secret env var) and JSON {"name": "${rep}", "organization_name": "${b.company}", "reveal_personal_emails": false}. If there is no match, search https://api.apollo.io/api/v1/mixed_people/api_search for the company (it returns ids but no emails), pick the closest name, then call people/match with {"id": <that person id>}.
 2. Write a short follow-up email (under 120 words, no em dashes, plain and specific) from the candidate to ${rep}, referencing ${JSON.stringify(b.points)} and the role "${b.role}".
 Do NOT send anything. Return ONLY a json code block:
 {"email":"found address or empty","apolloName":"name on the Apollo record","subject":"","body":""}
@@ -230,5 +245,5 @@ createServer(async (req, res) => {
     json(res, 500, { error: errText(e) })
   }
 }).listen(port, () =>
-  console.log(`[booth] http://localhost:${port}  app ${appId || '(set CREAO_APP_ID)'}  stt ${deepgramKey ? 'deepgram' : 'off (typed names only)'}  follow-ups → ${sendToRep ? 'rep (Apollo email)' : testEmail || '(set TEST_EMAIL)'}`),
+  console.log(`[booth] http://localhost:${port}  ${account ? 'account' : 'app'} agent ${agentId || '(set CREAO_AGENT_ID)'}  stt ${deepgramKey ? 'deepgram' : 'off (typed names only)'}  follow-ups → ${sendToRep ? 'rep (Apollo email)' : testEmail || '(set TEST_EMAIL)'}`),
 )
