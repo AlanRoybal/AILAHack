@@ -3,7 +3,7 @@
 // direction come from a one-time "lean right" calibration. A lean only counts
 // once it is held, so ordinary nods and glances don't fire.
 
-export const COMMIT_DEG = 14
+export const COMMIT_DEG = 10
 const HOLD_MS = 220
 const DEADZONE_DEG = 3
 // After a commit the head has to come back near neutral (or 1.5 s pass) before
@@ -71,8 +71,11 @@ export class Tilt {
     if (this.recent.length > 6) this.recent.shift()
     if (!this.base) this.base = g
     if (this.calib) return this.feedCalib(g, now)
-    const d = Math.max(-1, Math.min(1, g[this.axis] - this.base[this.axis]))
-    const lean = this.sign * Math.asin(d) * (180 / Math.PI)
+    const base = this.base
+    const up = base.reduce((b, v, i) => (Math.abs(v) > Math.abs(base[b]) ? i : b), 0)
+    const axis = this.calibrated ? this.axis : [0, 1, 2].filter(i => i !== up).reduce((b, i) => (Math.abs(g[i] - base[i]) > Math.abs(g[b] - base[b]) ? i : b))
+    const d = Math.max(-1, Math.min(1, g[axis] - base[axis]))
+    const lean = (this.calibrated ? this.sign : 1) * Math.asin(d) * (180 / Math.PI)
     if (this.settleUntil) {
       if (Math.abs(lean) > SETTLE_DEG && now < this.settleUntil) return void (this.lean = 0)
       this.settleUntil = 0

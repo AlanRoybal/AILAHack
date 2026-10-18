@@ -155,15 +155,27 @@ async function transcribe(pcm: Buffer, names: string[]) {
   return (j.results?.channels?.[0]?.alternatives?.[0]?.transcript as string) ?? ''
 }
 
+let lastView: { png: string; lean: number; at: number } = { png: '', lean: 0, at: 0 }
+const prefetch = new Map<string, Promise<{ rep: string; out: any; rs: Run } | null>>()
+function startPrefetch(company: string) {
+  const b = state.briefs.find(x => x.company === company)
+  const rep = reps[company]?.[0]?.name
+  if (!b || !rep || prefetch.has(company)) return
+  const rs: Run = { status: 'pending', startedAt: Date.now() }
+  prefetch.set(company, run(draftRequest(b, rep), rs).then(out => ({ rep, out, rs })).catch(() => null))
+}
+
 async function draft(company: string, heard: string) {
   const b = state.briefs.find(x => x.company === company)!
   const m = matchRep(heard, reps[company] ?? [])
   const f: Followup = (state.followups[company] = { phase: 'drafting', heard, rep: m?.rep.name ?? heard, matched: !!m, runs: [] })
   const rs: Run = { status: 'pending', startedAt: Date.now() }
-  f.runs.push(rs)
+  const pre = prefetch.get(company)
+  prefetch.delete(company)
   save()
   try {
-    const out = (await run(draftRequest(b, f.rep), rs)) as { email?: string; subject: string; body: string }
+    const hit = pre && (await pre)
+    const out = (hit && hit.rep === f.rep && hit.out?.subject ? (f.runs.push(hit.rs), hit.out) : (f.runs.push(rs), await run(draftRequest(b, f.rep), rs))) as { email?: string; subject: string; body: string }
     if (!out?.subject || !out?.body) throw new Error('CREAO returned no draft')
     Object.assign(f, { email: out.email || undefined, subject: out.subject, body: out.body })
     f.to = sendToRep ? f.email : testEmail
@@ -228,11 +240,22 @@ createServer(async (req, res) => {
   const path = u.pathname.replace(/^\/api/, '')
   if (req.method === 'OPTIONS') return res.writeHead(204, cors).end()
   // Requests through the public tunnel must carry the lens token.
-  if (boothToken && req.headers['cf-connecting-ip'] && req.headers['x-booth-token'] !== boothToken) return json(res, 401, { error: 'bad token' })
+  const open = u.pathname === '/mirror' || (u.pathname === '/api/view' && req.method === 'GET')
+  if (boothToken && !open && req.headers['cf-connecting-ip'] && req.headers['x-booth-token'] !== boothToken && u.searchParams.get('t') !== boothToken) return json(res, 401, { error: 'bad token' })
   try {
     if (u.pathname === '/') {
       res.writeHead(200, { 'Content-Type': 'text/html' })
       return res.end(readFileSync(new URL('../public/index.html', import.meta.url)))
+    }
+    if (u.pathname === '/mirror') {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      return res.end(readFileSync(new URL('../public/mirror.html', import.meta.url)))
+    }
+    if (path === '/view' && req.method === 'GET') return json(res, 200, lastView)
+    if (path === '/view') {
+      const v = JSON.parse((await readRaw(req)).toString())
+      lastView = { png: String(v.png ?? ''), lean: Number(v.lean ?? 0), at: Date.now() }
+      return json(res, 200, { ok: true })
     }
     if (path === '/state') return json(res, 200, { ...state, now: Date.now(), testEmail, sendToRep })
     if (req.method !== 'POST') return json(res, 404, { error: 'not found' })
@@ -259,6 +282,7 @@ createServer(async (req, res) => {
     const company = u.searchParams.get('company') ?? ''
     if (!state.briefs.some(b => b.company === company)) return json(res, 404, { error: `no brief for ${company}` })
     if (path === '/cancel') return json(res, 200, { cancelled: cancel(company) })
+    if (path === '/ready') return startPrefetch(company), json(res, 202, { ok: true })
     if (path === '/name') {
       const phase = state.followups[company]?.phase
       if (phase && !['cancelled', 'failed'].includes(phase)) return json(res, 409, { error: `follow-up is ${phase}` })

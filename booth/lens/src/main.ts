@@ -36,6 +36,7 @@ let point = 0
 let pcm: Uint8Array[] = []
 let listenTimer = 0
 let leftAt = 0
+let firstDir = 0
 
 const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '.' : s)
 const brief = () => state.briefs[cursor]
@@ -90,7 +91,7 @@ function followupView(b: Brief, f: Followup): View {
       return {
         icon: { kind: 'countdown', secs: s, total: COUNTDOWN_S },
         title: `Sending to ${who}`,
-        sub: tilted ? 'now tilt right' : `in ${s}s`,
+        sub: tilted ? 'now tilt the other way' : `in ${s}s`,
         detail: f.to ? cut(f.to, 26) : undefined,
         hint: [['Tilt left, right', 'cancel']],
       }
@@ -169,8 +170,37 @@ function put(key: string, value: string, job: () => Promise<unknown>) {
   if (!draining) void drain()
 }
 
+let mirrored = ''
+let leanNow = 0
+const toImg = (bytes: number[]) => createImageBitmap(new Blob([new Uint8Array(bytes)], { type: 'image/png' }))
+async function mirror(v: View) {
+  const key = JSON.stringify(v)
+  if (key === mirrored) return
+  mirrored = key
+  const c = document.createElement('canvas')
+  c.width = 576
+  c.height = 288
+  const g = c.getContext('2d')!
+  g.fillStyle = '#000'
+  g.fillRect(0, 0, 576, 288)
+  const [ta, tb] = await title(v.title, [IMG.titleA.w, IMG.titleB.w])
+  g.drawImage(await toImg(await tile(v.icon)), IMG.tile.x, IMG.tile.y)
+  g.drawImage(await toImg(ta), IMG.titleA.x, IMG.titleA.y)
+  g.drawImage(await toImg(tb), IMG.titleB.x, IMG.titleB.y)
+  g.drawImage(await toImg(await hints(v.hint ?? [])), IMG.hint.x, IMG.hint.y)
+  g.font = '400 21px Inter, system-ui, sans-serif'
+  g.textBaseline = 'top'
+  g.fillStyle = '#f0f0f0'
+  g.fillText(v.sub, 184, 115)
+  g.fillStyle = '#bbbbbb'
+  ;(v.detail ?? '').split('\n').slice(0, 2).forEach((l, i) => g.fillText(l, 184, 147 + 28 * i, 388))
+  const png = c.toDataURL('image/png').split(',')[1]
+  if (key === mirrored) await call('/view', { method: 'POST', body: JSON.stringify({ png, lean: leanNow }), headers: { 'content-type': 'application/json' } }).catch(warn('mirror'))
+}
+
 async function render() {
   const v = view()
+  void mirror(v).catch(warn('mirror'))
   $('lens').textContent = [v.title, v.sub, v.detail, v.hint?.map(h => h.join(' ')).join('   ')].filter(Boolean).join('\n')
   put('tile', JSON.stringify(v.icon), async () =>
     bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: IMG.tile.id, containerName: IMG.tile.name, imageData: await tile(v.icon) })),
@@ -264,19 +294,26 @@ async function sendTypedName(name: string) {
 // Left then right within CANCEL_GAP_MS cancels a pending send.
 const tilt = new Tilt(
   dir => {
-    if (dir === -1) {
+    if (firstDir && dir !== firstDir && Date.now() - leftAt < CANCEL_GAP_MS && followup()?.phase === 'countdown') {
+      leftAt = 0
+      firstDir = 0
+      void api('/cancel').then(poll)
+    } else {
+      firstDir = dir
       leftAt = Date.now()
       void render()
     }
-    else if (Date.now() - leftAt < CANCEL_GAP_MS && followup()?.phase === 'countdown') {
-      leftAt = 0
-      void api('/cancel').then(poll)
-    }
     tilt.arm()
   },
-  lean => ($('lean').textContent = `lean ${lean.toFixed(0)}°`),
+  lean => {
+    $('lean').textContent = `lean ${lean.toFixed(0)}°`
+    if (Math.abs(lean - leanNow) >= 3) {
+      leanNow = lean
+      mirrored = ''
+      void render()
+    }
+  },
 )
-if (!tilt.calibrated) tilt.calibrate(() => ($('lean').textContent = 'calibrated'))
 
 bridge.imuControl(true, ImuReportPace.P100).catch(warn('imu'))
 let realImu = false
@@ -318,7 +355,10 @@ bridge.onEvenHubEvent(event => {
     else {
       const f = followup()
       if (f ? f.phase === 'cancelled' || f.phase === 'failed' : screen === 'ready') startListen()
-      else if (!f) screen = 'ready'
+      else if (!f) {
+        screen = 'ready'
+        void api('/ready').catch(warn('prefetch'))
+      }
     }
   } else return
   void render()

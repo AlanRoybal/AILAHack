@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><title>Booth Brief: live from the G2</title>
+<style>
+body { margin: 0; height: 100vh; display: grid; place-items: center; background: #050505; color: #8a8a8a; font: 16px system-ui, sans-serif; }
+.wrap { text-align: center; }
+h1 { color: #e8e8e8; font-weight: 600; font-size: 22px; margin: 0 0 18px; letter-spacing: .02em; }
+.lens { padding: 28px; border-radius: 40px; background: #000; box-shadow: 0 0 0 2px #1d1d1d, 0 30px 80px rgba(0,0,0,.6); }
+canvas { width: min(88vw, 1152px); aspect-ratio: 2 / 1; display: block; filter: drop-shadow(0 0 6px rgba(60,255,100,.35)); }
+#status { margin-top: 16px; min-height: 20px; }
+</style></head>
+<body><div class="wrap"><h1>Live from the G2</h1><div class="lens"><canvas id="c" width="576" height="288"></canvas></div><div id="status">Waiting for the glasses…</div></div>
+<script>
+const c = document.getElementById('c'), g = c.getContext('2d'), st = document.getElementById('status')
+let last = 0
+async function tick() {
+  try {
+    const v = await (await fetch('/api/view' + location.search)).json()
+    if (v.at && v.at !== last) {
+      last = v.at
+      const img = new Image()
+      img.onload = () => {
+        g.globalCompositeOperation = 'source-over'; g.fillStyle = '#000'; g.fillRect(0, 0, 576, 288); g.drawImage(img, 0, 0)
+        g.globalCompositeOperation = 'multiply'; g.fillStyle = '#3cff64'; g.fillRect(0, 0, 576, 288); g.globalCompositeOperation = 'source-over'
+      }
+      img.src = 'data:image/png;base64,' + v.png
+    }
+    st.textContent = v.at ? (Math.abs(v.lean) >= 3 ? `Head tilt ${Math.abs(v.lean).toFixed(0)}° ${v.lean > 0 ? 'one way' : 'the other way'}` : '') : 'Waiting for the glasses…'
+  } catch {}
+  setTimeout(tick, 250)
+}
+tick()
+</script></body></html>
